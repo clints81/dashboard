@@ -618,7 +618,7 @@ function renderCalendar() {
 // the briefing section and the "something to sit with" card from it.
 // No API key needed — the page is publicly readable.
 
-const NOTION_DASHBOARD_PAGE_ID = '367f8d217e6480e58f21dc36f60606d2';
+const BRIEFING_URL = 'https://raw.githubusercontent.com/clints81/dashboard/main/briefing.json';
 
 async function loadBriefing() {
   const headlinesEl = $('briefing-headlines');
@@ -629,33 +629,13 @@ async function loadBriefing() {
   const sitMetaEl   = $('sit-meta');
   const sitLinkEl   = $('sit-link');
 
-  // Notion's public page API — returns page blocks as JSON
-  const url = `https://api.notion.com/v1/blocks/${NOTION_DASHBOARD_PAGE_ID}/children`;
-
   try {
-    const res = await fetch(url, {
-      headers: {
-        'Notion-Version': '2022-06-28',
-        // No auth header — page must be publicly shared
-      }
-    });
+    // Add cache-busting so the browser doesn't serve yesterday's file
+    const res = await fetch(`${BRIEFING_URL}?t=${Date.now()}`);
 
-    if (!res.ok) throw new Error(`Notion ${res.status}`);
-    const data = await res.json();
+    if (!res.ok) throw new Error(`GitHub ${res.status}`);
 
-    // Find the code block containing our JSON
-    let jsonText = null;
-    for (const block of data.results || []) {
-      if (block.type === 'code') {
-        const texts = block.code?.rich_text || [];
-        jsonText = texts.map(t => t.plain_text).join('');
-        break;
-      }
-    }
-
-    if (!jsonText) throw new Error('No data block found');
-
-    const briefing = JSON.parse(jsonText);
+    const briefing = await res.json();
     const today = new Date().toISOString().split('T')[0];
     const isToday = briefing.date === today;
 
