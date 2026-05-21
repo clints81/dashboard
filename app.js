@@ -612,24 +612,102 @@ function renderCalendar() {
   if (badge) badge.textContent = '— events';
 }
 
-// ── Briefing Scaffold ──────────────────────────────────────────────────
-// Phase 2: pull from Gmail or a Notion summary page
+// ── Briefing + Sit With — live from Notion ─────────────────────────────
+// The briefing skill writes a JSON block to a public Notion page after each run.
+// We fetch that page's plain text export, extract the JSON, and render both
+// the briefing section and the "something to sit with" card from it.
+// No API key needed — the page is publicly readable.
 
-function renderBriefing() {
-  const el = $('briefing-headlines');
-  if (!el) return;
+const NOTION_DASHBOARD_PAGE_ID = '367f8d217e6480e58f21dc36f60606d2';
 
-  // Placeholder until cloud-scheduled briefing is wired
-  el.innerHTML = `
-    <div class="headline-item">
-      <span class="headline-num">→</span>
-      <span class="headline-text">Your briefing runs via Cowork — Phase 2 will surface today's headlines here automatically.</span>
-    </div>
-    <div class="headline-item">
-      <span class="headline-num">→</span>
-      <span class="headline-text">Once cloud-scheduled, the briefing summary will appear here each morning before you open this dashboard.</span>
-    </div>
-  `;
+async function loadBriefing() {
+  const headlinesEl = $('briefing-headlines');
+  const synthesisEl = document.querySelector('.briefing-summary');
+  const sitTypeEl   = $('sit-type');
+  const sitHeadEl   = $('sit-headline');
+  const sitDescEl   = $('sit-desc');
+  const sitMetaEl   = $('sit-meta');
+  const sitLinkEl   = $('sit-link');
+
+  // Notion's public page API — returns page blocks as JSON
+  const url = `https://api.notion.com/v1/blocks/${NOTION_DASHBOARD_PAGE_ID}/children`;
+
+  try {
+    const res = await fetch(url, {
+      headers: {
+        'Notion-Version': '2022-06-28',
+        // No auth header — page must be publicly shared
+      }
+    });
+
+    if (!res.ok) throw new Error(`Notion ${res.status}`);
+    const data = await res.json();
+
+    // Find the code block containing our JSON
+    let jsonText = null;
+    for (const block of data.results || []) {
+      if (block.type === 'code') {
+        const texts = block.code?.rich_text || [];
+        jsonText = texts.map(t => t.plain_text).join('');
+        break;
+      }
+    }
+
+    if (!jsonText) throw new Error('No data block found');
+
+    const briefing = JSON.parse(jsonText);
+    const today = new Date().toISOString().split('T')[0];
+    const isToday = briefing.date === today;
+
+    // ── Synthesis ──
+    if (synthesisEl) {
+      synthesisEl.innerHTML = isToday
+        ? `<span class="briefing-lede">${briefing.synthesis}</span>`
+        : `<span style="color:var(--ink-4);font-style:italic">Briefing not yet run today — showing ${briefing.day}'s edition.</span> ${briefing.synthesis}`;
+    }
+
+    // ── Headlines ──
+    if (headlinesEl && briefing.headlines?.length) {
+      headlinesEl.innerHTML = briefing.headlines.map((h, i) => `
+        <div class="headline-item" onclick="window.open('${h.url}','_blank')" style="cursor:pointer">
+          <span class="headline-num">${String(i + 1).padStart(2, '0')}</span>
+          <span class="headline-text">
+            <strong>${h.title}</strong><br>
+            <span style="color:var(--ink-4)">${h.summary}</span>
+          </span>
+          <span class="headline-tag">${h.category}</span>
+        </div>
+      `).join('');
+    }
+
+    // ── Something to sit with ──
+    const s = briefing.sit_with;
+    if (s) {
+      if (sitTypeEl)  sitTypeEl.textContent  = s.type;
+      if (sitHeadEl)  sitHeadEl.textContent  = s.headline;
+      if (sitDescEl)  sitDescEl.textContent  = s.desc;
+      if (sitMetaEl)  sitMetaEl.textContent  = `${s.source} · ${s.read_time}`;
+      if (sitLinkEl)  { sitLinkEl.href = s.url; sitLinkEl.textContent = 'Read →'; }
+    }
+
+  } catch (e) {
+    // Graceful degradation — show config fallback for sit-with, placeholder for briefing
+    if (headlinesEl) headlinesEl.innerHTML = `
+      <div class="headline-item">
+        <span class="headline-num">→</span>
+        <span class="headline-text">Run today's briefing in Cowork to populate this section.</span>
+      </div>`;
+
+    // Fall back to config for sit-with
+    if (CONFIG.sitWith) {
+      const s = CONFIG.sitWith;
+      if (sitTypeEl)  sitTypeEl.textContent  = s.type;
+      if (sitHeadEl)  sitHeadEl.textContent  = s.headline;
+      if (sitDescEl)  sitDescEl.textContent  = s.desc;
+      if (sitMetaEl)  sitMetaEl.textContent  = `${s.source} · ${s.readTime}`;
+      if (sitLinkEl)  { sitLinkEl.href = s.url; sitLinkEl.textContent = 'Read →'; }
+    }
+  }
 }
 
 // ── Init ───────────────────────────────────────────────────────────────
@@ -641,15 +719,14 @@ function init() {
   renderJELS();
   renderPipeline();
   renderJournal();
-  renderSitWith();
   renderSlowBurns();
   renderCalendar();
-  renderBriefing();
 
   // Async / network-dependent
   loadWeather();
   loadSports();
   loadOnThisDay();
+  loadBriefing(); // handles both briefing and sit-with
 }
 
 document.addEventListener('DOMContentLoaded', init);

@@ -89,14 +89,16 @@ const CONFIG = {
   ],
 
   // ── Something to sit with ────────────────────
-  // Update manually — once a week is the right cadence.
+  // FALLBACK ONLY — the briefing skill writes this live after each run.
+  // This shows only if the Notion fetch fails (e.g. before first briefing run).
+  // Update manually if you want something here on days the briefing doesn't run.
   sitWith: {
-    type: "Essay · Politics",
-    headline: "The Slow Death of the Permanent Campaign",
-    desc: "A case for why the 24/7 political attention cycle is eroding the very deliberation it claims to cover — and what civic organizations are doing differently.",
-    source: "The Atlantic",
-    readTime: "~18 min",
-    url: "https://www.theatlantic.com",
+    type: "Essay · Culture",
+    headline: "Run today's briefing to populate this automatically.",
+    desc: "The briefing skill will write a long-read recommendation here each morning.",
+    source: "—",
+    readTime: "—",
+    url: "#",
   },
 
   // ── Slow burns ───────────────────────────────
