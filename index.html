@@ -1,0 +1,779 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Morning — Clint</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@300;400;500;600&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    /* ── Design tokens (matching mockup palette) ── */
+    :root {
+      --bg:        oklch(0.978 0.010 82);
+      --bg-2:      oklch(0.958 0.013 78);
+      --bg-3:      oklch(0.935 0.015 75);
+      --line:      oklch(0.885 0.014 75);
+      --line-2:    oklch(0.825 0.017 74);
+      --ink-4:     oklch(0.680 0.011 70);
+      --ink-3:     oklch(0.520 0.011 70);
+      --ink-2:     oklch(0.340 0.011 70);
+      --ink:       oklch(0.200 0.011 70);
+      --accent:    oklch(0.600 0.152 32);
+      --accent-soft: oklch(0.925 0.048 35);
+      --pos:       oklch(0.520 0.128 145);
+      --neg:       oklch(0.540 0.158 25);
+      --warn:      oklch(0.680 0.138 75);
+
+      --sans:    'Geist', ui-sans-serif, system-ui, sans-serif;
+      --serif:   'Instrument Serif', 'Source Serif Pro', Georgia, serif;
+      --mono:    'Geist Mono', ui-monospace, Menlo, monospace;
+
+      --r-lg: 16px;
+      --r-md: 10px;
+      --r-sm: 6px;
+      --pad: 18px;
+      --gap: 14px;
+    }
+
+    /* ── Reset ── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: var(--sans);
+      background: var(--bg);
+      color: var(--ink);
+      min-height: 100vh;
+      font-size: 13px;
+      line-height: 1.5;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* ── Layout ── */
+    .shell {
+      max-width: 1160px;
+      margin: 0 auto;
+      padding: 24px 20px 40px;
+    }
+
+    /* Top bar */
+    .topbar {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      margin-bottom: 20px;
+      padding-bottom: 14px;
+      border-bottom: 1px solid var(--line);
+    }
+    .topbar-left { display: flex; flex-direction: column; gap: 2px; }
+    .topbar-date {
+      font-size: 11px;
+      font-weight: 500;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--ink-4);
+    }
+    .topbar-greeting {
+      font-family: var(--serif);
+      font-size: 28px;
+      line-height: 1.1;
+      color: var(--ink);
+    }
+    .topbar-greeting em { font-style: italic; color: var(--accent); }
+    .topbar-time {
+      font-family: var(--mono);
+      font-size: 22px;
+      color: var(--ink-3);
+      letter-spacing: -0.02em;
+      text-align: right;
+    }
+    .topbar-time span { font-size: 13px; color: var(--ink-4); margin-left: 2px; }
+
+    /* Summary sentence */
+    .day-summary {
+      font-size: 14px;
+      color: var(--ink-3);
+      margin-bottom: 22px;
+      line-height: 1.6;
+      padding: 12px var(--pad);
+      background: var(--bg-2);
+      border-radius: var(--r-md);
+      border-left: 3px solid var(--accent);
+    }
+    .day-summary strong { color: var(--ink-2); font-weight: 500; }
+
+    /* Grid */
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(12, 1fr);
+      gap: var(--gap);
+    }
+
+    /* Card base */
+    .card {
+      background: var(--bg-2);
+      border: 1px solid var(--line);
+      border-radius: var(--r-lg);
+      padding: var(--pad);
+      position: relative;
+      overflow: hidden;
+    }
+    .card-label {
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--ink-4);
+      margin-bottom: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .card-label-badge {
+      font-size: 9px;
+      background: var(--bg-3);
+      color: var(--ink-4);
+      padding: 2px 7px;
+      border-radius: 20px;
+      font-weight: 500;
+      letter-spacing: 0.05em;
+    }
+
+    /* ── Col spans ── */
+    .col-4  { grid-column: span 4; }
+    .col-5  { grid-column: span 5; }
+    .col-6  { grid-column: span 6; }
+    .col-7  { grid-column: span 7; }
+    .col-8  { grid-column: span 8; }
+    .col-12 { grid-column: span 12; }
+
+    /* ── WEATHER ── */
+    .weather-main {
+      display: flex;
+      align-items: flex-start;
+      gap: 16px;
+      margin-bottom: 14px;
+    }
+    .weather-temp {
+      font-family: var(--serif);
+      font-size: 52px;
+      line-height: 1;
+      color: var(--ink);
+    }
+    .weather-temp sup { font-size: 20px; color: var(--ink-3); vertical-align: super; }
+    .weather-meta { padding-top: 6px; }
+    .weather-desc { font-size: 14px; color: var(--ink-2); font-weight: 500; margin-bottom: 2px; }
+    .weather-sub { font-size: 12px; color: var(--ink-4); line-height: 1.6; }
+    .weather-aqi {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--pos);
+      background: oklch(0.92 0.06 145);
+      padding: 3px 8px;
+      border-radius: 20px;
+      margin-top: 6px;
+    }
+    .weather-hourly {
+      display: flex;
+      gap: 0;
+      border-top: 1px solid var(--line);
+      padding-top: 12px;
+      overflow-x: auto;
+    }
+    .weather-hour {
+      flex: 1;
+      text-align: center;
+      min-width: 44px;
+    }
+    .weather-hour-time { font-size: 10px; color: var(--ink-4); margin-bottom: 4px; }
+    .weather-hour-temp { font-size: 13px; font-weight: 500; color: var(--ink-2); }
+    .weather-hour-rain { font-size: 10px; color: #5b8bd0; margin-top: 2px; }
+    .weather-forecast {
+      display: flex;
+      gap: 0;
+      border-top: 1px solid var(--line);
+      margin-top: 12px;
+      padding-top: 10px;
+    }
+    .forecast-day {
+      flex: 1;
+      text-align: center;
+    }
+    .forecast-day-name { font-size: 10px; color: var(--ink-4); text-transform: uppercase; letter-spacing: 0.06em; }
+    .forecast-day-hi { font-size: 12px; font-weight: 600; color: var(--ink-2); margin-top: 2px; }
+    .forecast-day-lo { font-size: 11px; color: var(--ink-4); }
+
+    /* ── BRIEFING ── */
+    .briefing-summary {
+      font-family: var(--serif);
+      font-size: 17px;
+      line-height: 1.55;
+      color: var(--ink-2);
+      margin-bottom: 16px;
+      font-style: italic;
+    }
+    .briefing-lede { font-style: normal; color: var(--ink); font-weight: 400; }
+    .briefing-headlines { display: flex; flex-direction: column; gap: 0; }
+    .headline-item {
+      display: flex;
+      align-items: baseline;
+      gap: 10px;
+      padding: 9px 0;
+      border-bottom: 1px solid var(--line);
+      cursor: pointer;
+    }
+    .headline-item:last-child { border-bottom: none; }
+    .headline-num {
+      font-family: var(--mono);
+      font-size: 10px;
+      color: var(--ink-4);
+      flex-shrink: 0;
+      min-width: 18px;
+    }
+    .headline-text {
+      font-size: 13px;
+      color: var(--ink-2);
+      line-height: 1.4;
+      flex: 1;
+    }
+    .headline-text:hover { color: var(--accent); }
+    .headline-tag {
+      font-size: 10px;
+      color: var(--ink-4);
+      flex-shrink: 0;
+      font-variant-numeric: tabular-nums;
+    }
+    .briefing-sources {
+      margin-top: 10px;
+      font-size: 10px;
+      color: var(--ink-4);
+      letter-spacing: 0.04em;
+    }
+
+    /* ── SOMETHING TO SIT WITH ── */
+    .sit-card {
+      background: oklch(0.235 0.018 35);
+      color: oklch(0.92 0.015 75);
+      border-color: oklch(0.30 0.025 35);
+    }
+    .sit-card .card-label { color: oklch(0.65 0.08 35); }
+    .sit-card .card-label-badge { background: oklch(0.30 0.025 35); color: oklch(0.65 0.08 35); }
+    .sit-label {
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--accent);
+      margin-bottom: 8px;
+    }
+    .sit-headline {
+      font-family: var(--serif);
+      font-size: 19px;
+      line-height: 1.35;
+      color: oklch(0.95 0.01 75);
+      margin-bottom: 8px;
+    }
+    .sit-desc {
+      font-size: 12.5px;
+      color: oklch(0.70 0.012 70);
+      line-height: 1.6;
+      margin-bottom: 12px;
+    }
+    .sit-meta {
+      font-size: 10px;
+      color: oklch(0.50 0.015 70);
+      letter-spacing: 0.04em;
+    }
+    .sit-cta {
+      display: inline-block;
+      margin-top: 12px;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--accent);
+      text-decoration: none;
+      border-bottom: 1px solid oklch(0.40 0.06 35);
+      padding-bottom: 2px;
+    }
+    .sit-cta:hover { border-color: var(--accent); }
+
+    /* ── SPORTS ── */
+    .sport-game {
+      border-bottom: 1px solid var(--line);
+      padding: 10px 0;
+    }
+    .sport-game:first-child { padding-top: 0; }
+    .sport-game:last-child { border-bottom: none; padding-bottom: 0; }
+    .sport-meta {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 6px;
+    }
+    .sport-league {
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--ink-4);
+    }
+    .sport-time {
+      font-family: var(--mono);
+      font-size: 10px;
+      color: var(--ink-4);
+    }
+    .sport-time.live { color: var(--neg); font-weight: 600; }
+    .sport-time.tonight { color: var(--accent); font-weight: 600; }
+    .sport-teams { display: flex; flex-direction: column; gap: 3px; }
+    .sport-team {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .sport-team-name { font-size: 13px; font-weight: 500; color: var(--ink-2); }
+    .sport-team-name.winner { color: var(--ink); font-weight: 600; }
+    .sport-team-score {
+      font-family: var(--mono);
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--ink-2);
+    }
+    .sport-team-score.winner { color: var(--ink); }
+    .sport-note {
+      font-size: 11px;
+      color: var(--ink-4);
+      margin-top: 4px;
+      line-height: 1.4;
+    }
+
+    /* Sport wire ticker */
+    .sport-wire {
+      font-size: 11.5px;
+      color: var(--ink-3);
+      line-height: 1.6;
+      border-top: 1px solid var(--line);
+      padding-top: 10px;
+      margin-top: 10px;
+    }
+    .wire-item { margin-bottom: 5px; }
+    .wire-tag {
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--ink-4);
+      margin-right: 5px;
+    }
+
+    /* ── CALENDAR ── */
+    .cal-items { display: flex; flex-direction: column; gap: 0; }
+    .cal-item {
+      display: flex;
+      gap: 12px;
+      padding: 9px 0;
+      border-bottom: 1px solid var(--line);
+      align-items: flex-start;
+    }
+    .cal-item:last-child { border-bottom: none; }
+    .cal-item.now { background: var(--accent-soft); margin: 0 calc(-1 * var(--pad)); padding: 9px var(--pad); }
+    .cal-time {
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--ink-4);
+      flex-shrink: 0;
+      width: 44px;
+      padding-top: 1px;
+    }
+    .cal-time.now-time { color: var(--accent); font-weight: 600; }
+    .cal-title { font-size: 13px; color: var(--ink-2); line-height: 1.4; }
+    .cal-sub { font-size: 11px; color: var(--ink-4); margin-top: 1px; }
+    .now-pill {
+      display: inline-block;
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      background: var(--accent);
+      color: white;
+      padding: 1px 6px;
+      border-radius: 20px;
+      margin-left: 6px;
+      vertical-align: middle;
+    }
+
+    /* ── GAMES ── */
+    .games-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .game-tile {
+      background: var(--bg-3);
+      border-radius: var(--r-md);
+      padding: 10px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      text-decoration: none;
+      border: 1px solid transparent;
+      transition: border-color 0.15s, background 0.15s;
+    }
+    .game-tile:hover { border-color: var(--line-2); background: var(--bg-2); }
+    .game-tile.done { opacity: 0.6; }
+    .game-abbr {
+      font-family: var(--mono);
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--ink-4);
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+    .game-name { font-size: 12px; color: var(--ink-2); font-weight: 500; }
+    .game-status { font-size: 11px; color: var(--ink-4); }
+    .game-status.done { color: var(--pos); }
+    .game-status.play { color: var(--accent); font-weight: 600; }
+    .games-streak {
+      margin-top: 12px;
+      padding-top: 12px;
+      border-top: 1px solid var(--line);
+      display: flex;
+      align-items: baseline;
+      gap: 8px;
+    }
+    .streak-num {
+      font-family: var(--serif);
+      font-size: 32px;
+      color: var(--ink);
+      line-height: 1;
+    }
+    .streak-label { font-size: 11px; color: var(--ink-4); }
+
+    /* ── JOB SEARCH ── */
+    .pipeline-items { display: flex; flex-direction: column; gap: 0; }
+    .pipeline-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 9px 0;
+      border-bottom: 1px solid var(--line);
+    }
+    .pipeline-item:last-child { border-bottom: none; }
+    .pipeline-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+    .pipeline-dot.hot   { background: var(--accent); }
+    .pipeline-dot.warm  { background: var(--warn); }
+    .pipeline-dot.cold  { background: var(--ink-4); }
+    .pipeline-dot.watch { background: var(--pos); }
+    .pipeline-org { font-size: 13px; color: var(--ink-2); font-weight: 500; flex: 1; }
+    .pipeline-stage { font-size: 11px; color: var(--ink-4); }
+    .pipeline-touch {
+      background: var(--bg-3);
+      border: 1px solid var(--line);
+      border-radius: var(--r-sm);
+      color: var(--ink-4);
+      font-size: 10px;
+      padding: 2px 7px;
+      cursor: pointer;
+      flex-shrink: 0;
+      transition: background 0.12s, color 0.12s;
+    }
+    .pipeline-touch:hover { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
+    .pipeline-age {
+      font-family: var(--mono);
+      font-size: 10px;
+      color: var(--ink-4);
+      min-width: 48px;
+      text-align: right;
+    }
+    .pipeline-age.stale { color: var(--neg); }
+    .pipeline-nudge {
+      margin-top: 12px;
+      padding: 10px 12px;
+      background: var(--accent-soft);
+      border-radius: var(--r-md);
+      font-size: 12px;
+      color: var(--ink-2);
+      line-height: 1.5;
+      border-left: 2px solid var(--accent);
+    }
+
+    /* ── JELS ── */
+    .jels-stat {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      padding: 10px 0;
+      border-bottom: 1px solid var(--line);
+    }
+    .jels-stat:last-child { border-bottom: none; }
+    .jels-stat-label { font-size: 10px; color: var(--ink-4); text-transform: uppercase; letter-spacing: 0.07em; }
+    .jels-stat-value { font-family: var(--serif); font-size: 22px; color: var(--ink); }
+    .jels-stat-sub { font-size: 11px; color: var(--ink-4); }
+    .jels-progress {
+      margin-top: 10px;
+      height: 5px;
+      background: var(--bg-3);
+      border-radius: 99px;
+      overflow: hidden;
+    }
+    .jels-progress-bar {
+      height: 100%;
+      background: var(--accent);
+      border-radius: 99px;
+      transition: width 0.6s ease;
+    }
+
+    /* ── JOURNAL ── */
+    .journal-prompt {
+      font-family: var(--serif);
+      font-size: 16px;
+      font-style: italic;
+      color: var(--ink-2);
+      line-height: 1.55;
+      margin-bottom: 14px;
+    }
+    .journal-streak {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+    .journal-streak-num {
+      font-family: var(--mono);
+      font-size: 18px;
+      font-weight: 600;
+      color: var(--accent);
+    }
+    .journal-streak-label { font-size: 11px; color: var(--ink-4); }
+    .journal-window {
+      font-size: 11px;
+      color: var(--ink-4);
+      margin-top: 8px;
+    }
+    .journal-window .closes { color: var(--warn); font-weight: 600; }
+
+    /* ── ON THIS DAY ── */
+    .otd-items { display: flex; flex-direction: column; gap: 0; }
+    .otd-item {
+      padding: 8px 0;
+      border-bottom: 1px solid var(--line);
+      font-size: 12.5px;
+      color: var(--ink-3);
+      line-height: 1.45;
+      display: flex;
+      gap: 10px;
+    }
+    .otd-item:last-child { border-bottom: none; }
+    .otd-year {
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--ink-4);
+      flex-shrink: 0;
+      padding-top: 1px;
+    }
+
+    /* ── SLOW BURNS ── */
+    .burn-items { display: flex; flex-direction: column; gap: 0; }
+    .burn-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 9px 0;
+      border-bottom: 1px solid var(--line);
+    }
+    .burn-item:last-child { border-bottom: none; }
+    .burn-name { font-size: 13px; color: var(--ink-2); flex: 1; }
+    .burn-age {
+      font-size: 10px;
+      font-family: var(--mono);
+      color: var(--ink-4);
+    }
+    .burn-age.overdue { color: var(--neg); }
+    .burn-bar {
+      height: 3px;
+      width: 40px;
+      background: var(--bg-3);
+      border-radius: 99px;
+      overflow: hidden;
+    }
+    .burn-fill {
+      height: 100%;
+      border-radius: 99px;
+      background: var(--accent);
+    }
+
+    /* ── LOADING / ERROR states ── */
+    .loading {
+      color: var(--ink-4);
+      font-size: 12px;
+      font-style: italic;
+    }
+    .error { color: var(--neg); font-size: 11px; }
+
+    /* ── Responsive ── */
+    @media (max-width: 900px) {
+      .col-4, .col-5, .col-6, .col-7, .col-8 { grid-column: span 12; }
+    }
+    @media (max-width: 600px) {
+      .shell { padding: 16px 14px 30px; }
+      .topbar-greeting { font-size: 22px; }
+    }
+  </style>
+</head>
+<body>
+<div class="shell">
+
+  <!-- Top bar -->
+  <div class="topbar">
+    <div class="topbar-left">
+      <div class="topbar-date" id="topbar-date">—</div>
+      <div class="topbar-greeting">Good morning, <em>Clint</em>.</div>
+    </div>
+    <div class="topbar-time" id="topbar-time">—<span>CT</span></div>
+  </div>
+
+  <!-- Day summary -->
+  <div class="day-summary" id="day-summary">
+    Loading your day…
+  </div>
+
+  <!-- Grid -->
+  <div class="grid">
+
+    <!-- ── WEATHER (col 4) ── -->
+    <div class="card col-4">
+      <div class="card-label">
+        Weather · Evanston
+        <span class="card-label-badge" id="weather-aqi-badge">—</span>
+      </div>
+      <div id="weather-content" class="loading">Fetching conditions…</div>
+    </div>
+
+    <!-- ── BRIEFING (col 8) ── -->
+    <div class="card col-8">
+      <div class="card-label">
+        The Briefing
+        <span class="card-label-badge">5 min read</span>
+      </div>
+      <div id="briefing-content">
+        <div class="briefing-summary">
+          Open your Gmail to read today's full briefing — or add a summary here once the cloud-scheduled version is live.
+        </div>
+        <!-- Static placeholder headlines — replace with live data in Phase 2 -->
+        <div class="briefing-headlines" id="briefing-headlines">
+          <div class="loading">Connect briefing in Phase 2 →</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── SOMETHING TO SIT WITH (col 5) ── -->
+    <div class="card col-5 sit-card">
+      <div class="card-label">
+        Something to sit with
+        <span class="card-label-badge">Long read</span>
+      </div>
+      <div id="sit-content">
+        <div class="sit-label" id="sit-type">Essay · Culture</div>
+        <div class="sit-headline" id="sit-headline">Update this each week with a piece worth your time.</div>
+        <div class="sit-desc" id="sit-desc">
+          This card is your learning instinct anchor — a story gaining traction, a cultural moment, an invitation to go deeper on something already in the news. One piece. One reason it's worth this morning.
+        </div>
+        <div class="sit-meta" id="sit-meta">Source · Est. read time</div>
+        <a href="#" class="sit-cta" id="sit-link" target="_blank">Read →</a>
+      </div>
+    </div>
+
+    <!-- ── SPORTS (col 7) ── -->
+    <div class="card col-7">
+      <div class="card-label">
+        Your teams
+        <span class="card-label-badge" id="sports-teams-badge">CHC · DET · TOT · NU</span>
+      </div>
+      <div id="sports-content" class="loading">Loading scores…</div>
+    </div>
+
+    <!-- ── CALENDAR (col 5) ── -->
+    <div class="card col-5">
+      <div class="card-label">
+        Today
+        <span class="card-label-badge" id="cal-badge">—</span>
+      </div>
+      <div class="cal-items" id="cal-content">
+        <div class="loading">Connect Google Calendar in Phase 2 →</div>
+      </div>
+    </div>
+
+    <!-- ── JOB SEARCH (col 7) ── -->
+    <div class="card col-7">
+      <div class="card-label">
+        Job search · pipeline
+        <span class="card-label-badge" id="pipeline-badge">—</span>
+      </div>
+      <div class="pipeline-items" id="pipeline-content">
+        <!-- Populated from config.js -->
+      </div>
+      <div class="pipeline-nudge" id="pipeline-nudge" style="display:none"></div>
+    </div>
+
+    <!-- ── NYT GAMES (col 5) ── -->
+    <div class="card col-5">
+      <div class="card-label">
+        Daily games
+        <span class="card-label-badge" id="streak-badge">—</span>
+      </div>
+      <div class="games-grid" id="games-grid">
+        <!-- Populated by JS -->
+      </div>
+      <div class="games-streak">
+        <div class="streak-num" id="streak-num">—</div>
+        <div class="streak-label">day streak · don't break it</div>
+      </div>
+    </div>
+
+    <!-- ── JELS PROJECT (col 4) ── -->
+    <div class="card col-4">
+      <div class="card-label">
+        JELS expansion
+        <span class="card-label-badge" id="jels-countdown-badge">—</span>
+      </div>
+      <div id="jels-content"><!-- Populated by JS --></div>
+    </div>
+
+    <!-- ── JOURNAL NUDGE (col 3) ── -->
+    <div class="card col-3">
+      <div class="card-label">Journal nudge</div>
+      <div class="journal-streak">
+        <div class="journal-streak-num" id="journal-streak">—</div>
+        <div class="journal-streak-label">day streak</div>
+      </div>
+      <div class="journal-prompt" id="journal-prompt">—</div>
+      <div class="journal-window" id="journal-window"></div>
+    </div>
+
+    <!-- ── SLOW BURNS (col 5) ── -->
+    <div class="card col-5">
+      <div class="card-label">
+        Slow burns
+        <span class="card-label-badge">Projects on the back burner</span>
+      </div>
+      <div class="burn-items" id="burn-content"><!-- Populated by JS --></div>
+    </div>
+
+    <!-- ── ON THIS DAY (col 4) ── -->
+    <div class="card col-4">
+      <div class="card-label">On this day</div>
+      <div class="otd-items" id="otd-content" class="loading">Loading…</div>
+    </div>
+
+  </div><!-- /grid -->
+</div><!-- /shell -->
+
+<script src="config.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
