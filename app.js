@@ -618,7 +618,7 @@ function renderCalendar() {
 // the briefing section and the "something to sit with" card from it.
 // No API key needed — the page is publicly readable.
 
-const BRIEFING_URL = 'https://raw.githubusercontent.com/clints81/dashboard/main/briefing.json';
+const BRIEFING_URL = 'https://briefing.clintsievers.workers.dev/';
 
 async function loadBriefing() {
   const headlinesEl = $('briefing-headlines');
