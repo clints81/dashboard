@@ -2,8 +2,17 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Morning — Clint</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Morning</title>
+
+  <!-- Home screen install -->
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="icon-180.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Morning">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="theme-color" content="#faf6ee">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@300;400;500;600&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -50,9 +59,12 @@
 
     /* ── Layout ── */
     .shell {
-      max-width: 1160px;
+      max-width: 1180px;
       margin: 0 auto;
-      padding: 24px 20px 40px;
+      padding: 20px 20px 40px;
+      padding-left:  max(20px, env(safe-area-inset-left));
+      padding-right: max(20px, env(safe-area-inset-right));
+      padding-bottom: max(40px, env(safe-area-inset-bottom));
     }
 
     /* Top bar */
@@ -615,13 +627,92 @@
     }
     .error { color: var(--neg); font-size: 11px; }
 
+    /* ── Rail: a column of stacked cards inside the 12-col grid ── */
+    .rail {
+      grid-column: span 4;
+      display: flex;
+      flex-direction: column;
+      gap: var(--gap);
+    }
+    .rail > .card { grid-column: auto; }
+
+    /* Missing span — the journal card asked for this and never got it */
+    .col-3 { grid-column: span 3; }
+
+    /* ── Briefing at reading size ── */
+    .briefing-summary { font-size: 19px; line-height: 1.6; }
+    .headline-item { padding: 12px 0; align-items: flex-start; }
+    .headline-cat {
+      font-size: 10px;
+      letter-spacing: 0.06em;
+      color: var(--ink-4);
+      flex-shrink: 0;
+      width: 74px;
+      padding-top: 3px;
+    }
+    .headline-text { font-size: 14px; line-height: 1.45; max-width: 68ch; }
+    .headline-text strong { font-weight: 600; color: var(--ink); }
+    .headline-sum { color: var(--ink-3); }
+
+    /* ── Sit-with, promoted to a full-width read ── */
+    .sit-hero { grid-column: span 12; }
+    .sit-hero .sit-inner {
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 40px;
+    }
+    .sit-hero .sit-body { max-width: 62ch; }
+    .sit-hero .sit-headline { font-size: 28px; line-height: 1.25; margin-bottom: 10px; }
+    .sit-hero .sit-desc { font-size: 14px; margin-bottom: 10px; }
+    .sit-hero .sit-cta {
+      flex-shrink: 0;
+      font-size: 13px;
+      padding: 10px 20px;
+      border: 1px solid oklch(0.40 0.06 35);
+      border-radius: var(--r-md);
+      margin-top: 0;
+    }
+    .sit-hero .sit-cta:hover { background: oklch(0.30 0.03 35); }
+
+    /* ── Divider between the reading half and the glance half ── */
+    .band {
+      grid-column: span 12;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin: 10px 0 -2px;
+      font-size: 11px;
+      letter-spacing: 0.06em;
+      color: var(--ink-4);
+    }
+    .band::after {
+      content: "";
+      flex: 1;
+      height: 1px;
+      background: var(--line);
+    }
+
     /* ── Responsive ── */
+    /* iPad 11" landscape sits right at 1194 — the default grid is tuned for it. */
+    @media (max-width: 1000px) {
+      .col-7 { grid-column: span 12; }
+      .rail  { grid-column: span 12; flex-direction: row; }
+      .rail > .card { flex: 1; }
+    }
     @media (max-width: 900px) {
-      .col-4, .col-5, .col-6, .col-7, .col-8 { grid-column: span 12; }
+      .col-3, .col-4, .col-5, .col-6, .col-7, .col-8 { grid-column: span 12; }
+      .rail { flex-direction: column; }
+      .sit-hero .sit-inner { flex-direction: column; align-items: flex-start; gap: 18px; }
     }
     @media (max-width: 600px) {
       .shell { padding: 16px 14px 30px; }
       .topbar-greeting { font-size: 22px; }
+      .headline-item { flex-direction: column; gap: 3px; }
+      .headline-cat { width: auto; padding-top: 0; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      * { transition: none !important; animation: none !important; }
     }
   </style>
 </head>
@@ -645,107 +736,88 @@
   <!-- Grid -->
   <div class="grid">
 
-    <!-- ── WEATHER (col 4) ── -->
-    <div class="card col-4">
-      <div class="card-label">
-        Weather · Evanston
-        <span class="card-label-badge" id="weather-aqi-badge">—</span>
-      </div>
-      <div id="weather-content" class="loading">Fetching conditions…</div>
-    </div>
-
     <!-- ── BRIEFING (col 8) ── -->
     <div class="card col-8">
       <div class="card-label">
         The Briefing
-        <span class="card-label-badge">5 min read</span>
+        <span class="card-label-badge" id="briefing-count">—</span>
       </div>
       <div id="briefing-content">
         <div class="briefing-summary">
-          Open your Gmail to read today's full briefing — or add a summary here once the cloud-scheduled version is live.
+          Waiting on this morning's briefing.
         </div>
-        <!-- Static placeholder headlines — replace with live data in Phase 2 -->
         <div class="briefing-headlines" id="briefing-headlines">
-          <div class="loading">Connect briefing in Phase 2 →</div>
+          <div class="loading">Loading…</div>
         </div>
       </div>
     </div>
 
-    <!-- ── SOMETHING TO SIT WITH (col 5) ── -->
-    <div class="card col-5 sit-card">
+    <!-- ── RAIL: weather, today, teams ── -->
+    <div class="rail">
+
+      <div class="card">
+        <div class="card-label">
+          Weather · Evanston
+          <span class="card-label-badge" id="weather-aqi-badge">—</span>
+        </div>
+        <div id="weather-content" class="loading">Fetching conditions…</div>
+      </div>
+
+      <div class="card">
+        <div class="card-label">
+          Today
+          <span class="card-label-badge" id="cal-badge">—</span>
+        </div>
+        <div class="cal-items" id="cal-content">
+          <div class="loading">Google Calendar not connected yet.</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-label">
+          Your teams
+          <span class="card-label-badge" id="sports-teams-badge">CHC · DET · TOT · NU</span>
+        </div>
+        <div id="sports-content" class="loading">Loading scores…</div>
+      </div>
+
+      <div class="card">
+        <div class="card-label">On this day</div>
+        <div class="otd-items" id="otd-content"></div>
+      </div>
+
+    </div>
+
+    <!-- ── SOMETHING TO SIT WITH — full width ── -->
+    <div class="card sit-hero sit-card">
       <div class="card-label">
         Something to sit with
-        <span class="card-label-badge">Long read</span>
+        <span class="card-label-badge" id="sit-type">Long read</span>
       </div>
-      <div id="sit-content">
-        <div class="sit-label" id="sit-type">Essay · Culture</div>
-        <div class="sit-headline" id="sit-headline">Update this each week with a piece worth your time.</div>
-        <div class="sit-desc" id="sit-desc">
-          This card is your learning instinct anchor — a story gaining traction, a cultural moment, an invitation to go deeper on something already in the news. One piece. One reason it's worth this morning.
+      <div class="sit-inner" id="sit-content">
+        <div class="sit-body">
+          <div class="sit-headline" id="sit-headline">Waiting on this morning's pick.</div>
+          <div class="sit-desc" id="sit-desc">One longer piece each morning, chosen to be worth the time.</div>
+          <div class="sit-meta" id="sit-meta">Source · Est. read time</div>
         </div>
-        <div class="sit-meta" id="sit-meta">Source · Est. read time</div>
-        <a href="#" class="sit-cta" id="sit-link" target="_blank">Read →</a>
+        <a href="#" class="sit-cta" id="sit-link" target="_blank" rel="noopener">Read it</a>
       </div>
     </div>
 
-    <!-- ── SPORTS (col 7) ── -->
-    <div class="card col-7">
-      <div class="card-label">
-        Your teams
-        <span class="card-label-badge" id="sports-teams-badge">CHC · DET · TOT · NU</span>
-      </div>
-      <div id="sports-content" class="loading">Loading scores…</div>
-    </div>
+    <div class="band">The rest of the morning</div>
 
-    <!-- ── CALENDAR (col 5) ── -->
-    <div class="card col-5">
-      <div class="card-label">
-        Today
-        <span class="card-label-badge" id="cal-badge">—</span>
-      </div>
-      <div class="cal-items" id="cal-content">
-        <div class="loading">Connect Google Calendar in Phase 2 →</div>
-      </div>
-    </div>
-
-    <!-- ── JOB SEARCH (col 7) ── -->
-    <div class="card col-7">
+    <!-- ── JOB SEARCH ── -->
+    <div class="card col-4">
       <div class="card-label">
         Job search · pipeline
         <span class="card-label-badge" id="pipeline-badge">—</span>
       </div>
-      <div class="pipeline-items" id="pipeline-content">
-        <!-- Populated from config.js -->
-      </div>
+      <div class="pipeline-items" id="pipeline-content"></div>
       <div class="pipeline-nudge" id="pipeline-nudge" style="display:none"></div>
     </div>
 
-    <!-- ── NYT GAMES (col 5) ── -->
-    <div class="card col-5">
-      <div class="card-label">
-        Daily games
-        <span class="card-label-badge" id="streak-badge">—</span>
-      </div>
-      <div class="games-grid" id="games-grid">
-        <!-- Populated by JS -->
-      </div>
-      <div class="games-streak">
-        <div class="streak-num" id="streak-num">—</div>
-        <div class="streak-label">day streak · don't break it</div>
-      </div>
-    </div>
-
-    <!-- ── JELS PROJECT (col 4) ── -->
+    <!-- ── JOURNAL ── -->
     <div class="card col-4">
-      <div class="card-label">
-        JELS expansion
-        <span class="card-label-badge" id="jels-countdown-badge">—</span>
-      </div>
-      <div id="jels-content"><!-- Populated by JS --></div>
-    </div>
-
-    <!-- ── JOURNAL NUDGE (col 3) ── -->
-    <div class="card col-3">
       <div class="card-label">Journal nudge</div>
       <div class="journal-streak">
         <div class="journal-streak-num" id="journal-streak">—</div>
@@ -755,19 +827,35 @@
       <div class="journal-window" id="journal-window"></div>
     </div>
 
-    <!-- ── SLOW BURNS (col 5) ── -->
-    <div class="card col-5">
+    <!-- ── NYT GAMES ── -->
+    <div class="card col-4">
       <div class="card-label">
-        Slow burns
-        <span class="card-label-badge">Projects on the back burner</span>
+        Daily games
+        <span class="card-label-badge" id="streak-badge">—</span>
       </div>
-      <div class="burn-items" id="burn-content"><!-- Populated by JS --></div>
+      <div class="games-grid" id="games-grid"></div>
+      <div class="games-streak">
+        <div class="streak-num" id="streak-num">—</div>
+        <div class="streak-label">day streak · don't break it</div>
+      </div>
     </div>
 
-    <!-- ── ON THIS DAY (col 4) ── -->
-    <div class="card col-4">
-      <div class="card-label">On this day</div>
-      <div class="otd-items" id="otd-content" class="loading">Loading…</div>
+    <!-- ── JELS PROJECT ── -->
+    <div class="card col-6">
+      <div class="card-label">
+        JELS expansion
+        <span class="card-label-badge" id="jels-countdown-badge">—</span>
+      </div>
+      <div id="jels-content"></div>
+    </div>
+
+    <!-- ── SLOW BURNS ── -->
+    <div class="card col-6">
+      <div class="card-label">
+        Slow burns
+        <span class="card-label-badge">Back burner</span>
+      </div>
+      <div class="burn-items" id="burn-content"></div>
     </div>
 
   </div><!-- /grid -->

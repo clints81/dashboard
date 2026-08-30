@@ -60,8 +60,7 @@ function renderDaySummary() {
   const now = new Date();
   const hour = now.getHours();
   const greeting = hour < 9 ? "Early start today." : hour < 12 ? "Morning." : "";
-  // Build dynamically; calendar data will enhance this in Phase 2
-  el.innerHTML = `${greeting} Check your calendar for today's commitments. Job search pipeline is live below — <strong>one outreach</strong> is the goal before noon.`;
+  el.innerHTML = `${greeting} The goal before noon is <strong>one outreach</strong>.`;
 }
 
 // ── Weather ────────────────────────────────────────────────────────────
@@ -531,7 +530,7 @@ function renderSitWith() {
   if (headlineEl) headlineEl.textContent = sitWith.headline;
   if (descEl) descEl.textContent = sitWith.desc;
   if (metaEl) metaEl.textContent = `${sitWith.source} · ${sitWith.readTime}`;
-  if (linkEl) { linkEl.href = sitWith.url; linkEl.textContent = 'Read →'; }
+  if (linkEl) { linkEl.href = sitWith.url; linkEl.textContent = 'Read it'; }
 }
 
 // ── Slow Burns ─────────────────────────────────────────────────────────
@@ -604,8 +603,8 @@ function renderCalendar() {
     <div class="cal-item">
       <div class="cal-time">—</div>
       <div>
-        <div class="cal-title">Google Calendar in Phase 2</div>
-        <div class="cal-sub">Add your client ID to config.js to enable live events</div>
+        <div class="cal-title">Google Calendar not connected</div>
+        <div class="cal-sub">Nothing scheduled here yet</div>
       </div>
     </div>
   `;
@@ -613,10 +612,9 @@ function renderCalendar() {
 }
 
 // ── Briefing + Sit With — live from Notion ─────────────────────────────
-// The briefing skill writes a JSON block to a public Notion page after each run.
-// We fetch that page's plain text export, extract the JSON, and render both
-// the briefing section and the "something to sit with" card from it.
-// No API key needed — the page is publicly readable.
+// The briefing skill PUTs today's JSON to a Cloudflare Worker each morning.
+// The Worker serves it back publicly, with CORS headers so the browser can read it.
+// No key needed to read; the write key lives only in the briefing skill.
 
 const BRIEFING_URL = 'https://briefing.clintsievers.workers.dev/';
 
@@ -643,21 +641,22 @@ async function loadBriefing() {
     if (synthesisEl) {
       synthesisEl.innerHTML = isToday
         ? `<span class="briefing-lede">${briefing.synthesis}</span>`
-        : `<span style="color:var(--ink-4);font-style:italic">Briefing not yet run today — showing ${briefing.day}'s edition.</span> ${briefing.synthesis}`;
+        : `<span style="color:var(--ink-4);font-style:italic">No briefing yet today. Showing ${briefing.day}'s.</span> ${briefing.synthesis}`;
     }
 
     // ── Headlines ──
     if (headlinesEl && briefing.headlines?.length) {
-      headlinesEl.innerHTML = briefing.headlines.map((h, i) => `
-        <div class="headline-item" onclick="window.open('${h.url}','_blank')" style="cursor:pointer">
-          <span class="headline-num">${String(i + 1).padStart(2, '0')}</span>
+      headlinesEl.innerHTML = briefing.headlines.map(h => `
+        <div class="headline-item" onclick="window.open('${h.url}','_blank')">
+          <span class="headline-cat">${h.category}</span>
           <span class="headline-text">
             <strong>${h.title}</strong><br>
-            <span style="color:var(--ink-4)">${h.summary}</span>
+            <span class="headline-sum">${h.summary}</span>
           </span>
-          <span class="headline-tag">${h.category}</span>
         </div>
       `).join('');
+      const countEl = $('briefing-count');
+      if (countEl) countEl.textContent = `${briefing.headlines.length} stories`;
     }
 
     // ── Something to sit with ──
@@ -667,7 +666,7 @@ async function loadBriefing() {
       if (sitHeadEl)  sitHeadEl.textContent  = s.headline;
       if (sitDescEl)  sitDescEl.textContent  = s.desc;
       if (sitMetaEl)  sitMetaEl.textContent  = `${s.source} · ${s.read_time}`;
-      if (sitLinkEl)  { sitLinkEl.href = s.url; sitLinkEl.textContent = 'Read →'; }
+      if (sitLinkEl)  { sitLinkEl.href = s.url; sitLinkEl.textContent = 'Read it'; }
     }
 
   } catch (e) {
@@ -675,7 +674,7 @@ async function loadBriefing() {
     if (headlinesEl) headlinesEl.innerHTML = `
       <div class="headline-item">
         <span class="headline-num">→</span>
-        <span class="headline-text">Run today's briefing in Cowork to populate this section.</span>
+        <span class="headline-text">No briefing yet today. It lands at 6am on weekdays.</span>
       </div>`;
 
     // Fall back to config for sit-with
@@ -685,7 +684,7 @@ async function loadBriefing() {
       if (sitHeadEl)  sitHeadEl.textContent  = s.headline;
       if (sitDescEl)  sitDescEl.textContent  = s.desc;
       if (sitMetaEl)  sitMetaEl.textContent  = `${s.source} · ${s.readTime}`;
-      if (sitLinkEl)  { sitLinkEl.href = s.url; sitLinkEl.textContent = 'Read →'; }
+      if (sitLinkEl)  { sitLinkEl.href = s.url; sitLinkEl.textContent = 'Read it'; }
     }
   }
 }
