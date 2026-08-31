@@ -33,6 +33,18 @@ const CONFIG = {
     epl: { espnId: "18", label: "Tottenham", abbr: "TOT" },
   },
 
+  // ── Orangetheory daily workout ──────────────
+  // The daily thread is posted the evening before and titled with the date
+  // it's FOR. We match on that date, so titleContains only needs to be the
+  // stable word in the title — not the whole phrase.
+  workout: {
+    subreddit: "orangetheory",
+    titleContains: "workout",
+    // The mods flair the live thread "Today's Workout". That's the signal we
+    // trust first; date-in-title is only the fallback.
+    todayFlairContains: "today",
+  },
+
   // ── Journal nudge ────────────────────────────
   // Add your own prompts. One is picked each day.
   // windowCloses: time in HH:MM (24h) local — nudge after this changes
