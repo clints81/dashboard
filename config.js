@@ -34,15 +34,10 @@ const CONFIG = {
   },
 
   // ── Orangetheory daily workout ──────────────
-  // The daily thread is posted the evening before and titled with the date
-  // it's FOR. We match on that date, so titleContains only needs to be the
-  // stable word in the title — not the whole phrase.
+  // Just a link. Reddit blocks reading its data endpoints, so the dashboard
+  // can't tell you whether today's thread is up — only take you to the sub.
   workout: {
     subreddit: "orangetheory",
-    titleContains: "workout",
-    // The mods flair the live thread "Today's Workout". That's the signal we
-    // trust first; date-in-title is only the fallback.
-    todayFlairContains: "today",
   },
 
   // ── Journal nudge ────────────────────────────

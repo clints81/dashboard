@@ -440,102 +440,24 @@ function renderCalendar() {
 }
 
 // ── Orangetheory daily workout ─────────────────────────────────────────
-// r/orangetheory's daily thread is generated the *evening before* and titled
-// with the date it's for. So we match on the date in the title, not on when
-// the post was created — the timestamp only tells us when the bot ran.
+// Reddit blocks programmatic reads of its JSON endpoints (search.json returns
+// "blocked by network security" even from a plain browser tab), so there's no
+// way to fetch the daily thread. A Worker proxy wouldn't help — the block is
+// on Reddit's side, not the browser's. Sanctioned route is their OAuth API,
+// which isn't worth a client secret for one link.
 //
-// Details live in the comments, so this card's job is to get you into the
-// right thread in one tap, not to show you the workout.
+// So: a static link. No fetch, no failure mode. It can't tell you whether the
+// thread is up, but it saves the hunt for it.
 
-// Every reasonable way a date might be written in a post title.
-function dateVariants(d) {
-  const days   = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
-  const months = ['January','February','March','April','May','June','July',
-                  'August','September','October','November','December'];
-  const day = days[d.getDay()];
-  const mon = months[d.getMonth()];
-  const abbrDay = day.slice(0, 3);
-  const abbrMon = mon.slice(0, 3);
-  const n  = d.getDate();
-  const m  = d.getMonth() + 1;
-  const yr = d.getFullYear();
-  const yy = String(yr).slice(2);
-  const ord = n + (n % 10 === 1 && n !== 11 ? 'st' : n % 10 === 2 && n !== 12 ? 'nd'
-                 : n % 10 === 3 && n !== 13 ? 'rd' : 'th');
-
-  return [
-    `${day}, ${mon} ${n}, ${yr}`, `${day}, ${mon} ${n}`, `${day} ${mon} ${n}`,
-    `${abbrDay}, ${abbrMon} ${n}`, `${mon} ${n}, ${yr}`, `${mon} ${n}`,
-    `${abbrMon} ${n}`, `${n} ${mon}`, `${mon} ${ord}`, `${day}, ${mon} ${ord}`,
-    `${m}/${n}/${yr}`, `${m}/${n}/${yy}`,
-    `${String(m).padStart(2,'0')}/${String(n).padStart(2,'0')}/${yr}`,
-    `${yr}-${String(m).padStart(2,'0')}-${String(n).padStart(2,'0')}`,
-  ].map(v => v.toLowerCase());
-}
-
-async function loadWorkout() {
+function renderWorkout() {
   const el = $('workout-content');
   if (!el) return;
-
-  const sub  = CONFIG.workout?.subreddit || 'orangetheory';
-  const term = (CONFIG.workout?.titleContains || 'workout').toLowerCase();
-  const subUrl = `https://www.reddit.com/r/${sub}/`;
-
-  const plainLink = (note) => `
-    ${note ? `<div class="workout-empty">${note}</div>` : ''}
-    <a class="workout-link" href="${subUrl}" target="_blank" rel="noopener">
-      <div class="workout-title">Open r/${sub}</div>
-      <div class="workout-sub">Straight to the sub</div>
+  const sub = CONFIG.workout?.subreddit || 'orangetheory';
+  el.innerHTML = `
+    <a class="workout-link" href="https://www.reddit.com/r/${sub}/" target="_blank" rel="noopener">
+      <div class="workout-title">Today's workout thread</div>
+      <div class="workout-sub">r/${sub}</div>
     </a>`;
-
-  try {
-    const q = encodeURIComponent(`title:"${term}"`);
-    const url = `https://www.reddit.com/r/${sub}/search.json` +
-      `?q=${q}&restrict_sr=1&sort=new&limit=25&raw_json=1&t=week`;
-
-    const res = await fetchRetry(url);
-    const data = await res.json();
-    const posts = (data?.data?.children || []).map(c => c.data);
-
-    const flairTerm = (CONFIG.workout?.todayFlairContains || 'today').toLowerCase();
-    const named = posts.filter(pd => (pd.title || '').toLowerCase().includes(term));
-
-    // Primary: the mods flair the live thread. Trust that over anything we infer.
-    let post = named.find(pd =>
-      (pd.link_flair_text || '').toLowerCase().includes(flairTerm)
-    );
-
-    // Fallback: no flair set yet — match today's date in the title.
-    let matchedBy = 'flair';
-    if (!post) {
-      const wanted = dateVariants(new Date());
-      post = named.find(pd => wanted.some(v => (pd.title || '').toLowerCase().includes(v)));
-      matchedBy = 'date';
-    }
-
-    if (!post) {
-      el.innerHTML = plainLink("Couldn't identify today's thread.");
-      return;
-    }
-
-    const comments = post.num_comments || 0;
-    const link = `https://www.reddit.com${post.permalink}`;
-    const flair = post.link_flair_text
-      ? `<span class="workout-flair">${post.link_flair_text}</span>` : '';
-    const hedge = matchedBy === 'date'
-      ? '<div class="workout-empty">Not flaired yet — matched on date.</div>' : '';
-
-    el.innerHTML = `
-      ${hedge}
-      <a class="workout-link" href="${link}" target="_blank" rel="noopener">
-        ${flair}
-        <div class="workout-title">${post.title}</div>
-        <div class="workout-sub">${comments} comment${comments === 1 ? '' : 's'}</div>
-      </a>`;
-
-  } catch (e) {
-    el.innerHTML = plainLink("Couldn't reach Reddit.");
-  }
 }
 
 // ── Briefing + Sit With — live from Notion ─────────────────────────────
@@ -622,6 +544,7 @@ function renderStatic() {
   renderJournal();
   renderSlowBurns();
   renderCalendar();
+  renderWorkout();
 }
 
 // Cards that depend on the network. Safe to call again at any time.
@@ -629,7 +552,6 @@ function loadLiveData() {
   loadWeather();
   loadSports();
   loadOnThisDay();
-  loadWorkout();
   loadBriefing(); // handles both briefing and sit-with
 }
 
