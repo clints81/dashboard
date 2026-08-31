@@ -14,19 +14,6 @@ const CONFIG = {
     timezone: "America/Chicago",
   },
 
-  // ── NYT Games ───────────────────────────────
-  // Update streak once a day — just the number.
-  // Clicking a tile on the dashboard marks it done; resets automatically at midnight.
-  games: {
-    streak: 187,
-    games: [
-      { abbr: "Wo", name: "Wordle",         url: "https://www.nytimes.com/games/wordle" },
-      { abbr: "Co", name: "Connections",    url: "https://www.nytimes.com/games/connections" },
-      { abbr: "St", name: "Strands",        url: "https://www.nytimes.com/games/strands" },
-      { abbr: "Mc", name: "Mini Crossword", url: "https://www.nytimes.com/games/mini" },
-    ],
-  },
-
   // ── Sports — your followed teams ────────────
   // ESPN's undocumented API pulls live scores automatically.
   // Just keep this list current with your teams.
@@ -44,28 +31,6 @@ const CONFIG = {
     ],
     // EPL team
     epl: { espnId: "18", label: "Tottenham", abbr: "TOT" },
-  },
-
-  // ── Job search pipeline ──────────────────────
-  // Update org, role, status, and stage here as your search evolves.
-  // "Touched today" button on the dashboard sets the last-contact date automatically.
-  // status: "hot" | "warm" | "cold" | "watch"
-  pipeline: [
-    { org: "Disagree Better", role: "COO / Ops", status: "hot",   stage: "Exploratory call done" },
-    { org: "org 2",           role: "—",         status: "watch", stage: "Watching" },
-    { org: "org 3",           role: "—",         status: "warm",  stage: "Applied" },
-  ],
-  // Show nudge after this many days of silence
-  pipelineNudgeAfter: 10,
-
-  // ── JELS Expansion project ───────────────────
-  jels: {
-    groundbreakingDate: "2029-05-01",  // target
-    openingDate:        "2030-08-01",  // target
-    campaignGoal:       500000,        // total campaign goal $
-    campaignRaised:     87000,         // update as pledges come in
-    reserveTarget:      175000,        // pre-construction cash target
-    reserveCurrent:     50000,         // already held / paid to architect
   },
 
   // ── Journal nudge ────────────────────────────

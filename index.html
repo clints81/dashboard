@@ -418,128 +418,6 @@
       vertical-align: middle;
     }
 
-    /* ── GAMES ── */
-    .games-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-    .game-tile {
-      background: var(--bg-3);
-      border-radius: var(--r-md);
-      padding: 10px 12px;
-      display: flex;
-      flex-direction: column;
-      gap: 4px;
-      text-decoration: none;
-      border: 1px solid transparent;
-      transition: border-color 0.15s, background 0.15s;
-    }
-    .game-tile:hover { border-color: var(--line-2); background: var(--bg-2); }
-    .game-tile.done { opacity: 0.6; }
-    .game-abbr {
-      font-family: var(--mono);
-      font-size: 11px;
-      font-weight: 600;
-      color: var(--ink-4);
-      letter-spacing: 0.06em;
-      text-transform: uppercase;
-    }
-    .game-name { font-size: 12px; color: var(--ink-2); font-weight: 500; }
-    .game-status { font-size: 11px; color: var(--ink-4); }
-    .game-status.done { color: var(--pos); }
-    .game-status.play { color: var(--accent); font-weight: 600; }
-    .games-streak {
-      margin-top: 12px;
-      padding-top: 12px;
-      border-top: 1px solid var(--line);
-      display: flex;
-      align-items: baseline;
-      gap: 8px;
-    }
-    .streak-num {
-      font-family: var(--serif);
-      font-size: 32px;
-      color: var(--ink);
-      line-height: 1;
-    }
-    .streak-label { font-size: 11px; color: var(--ink-4); }
-
-    /* ── JOB SEARCH ── */
-    .pipeline-items { display: flex; flex-direction: column; gap: 0; }
-    .pipeline-item {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      padding: 9px 0;
-      border-bottom: 1px solid var(--line);
-    }
-    .pipeline-item:last-child { border-bottom: none; }
-    .pipeline-dot {
-      width: 7px;
-      height: 7px;
-      border-radius: 50%;
-      flex-shrink: 0;
-    }
-    .pipeline-dot.hot   { background: var(--accent); }
-    .pipeline-dot.warm  { background: var(--warn); }
-    .pipeline-dot.cold  { background: var(--ink-4); }
-    .pipeline-dot.watch { background: var(--pos); }
-    .pipeline-org { font-size: 13px; color: var(--ink-2); font-weight: 500; flex: 1; }
-    .pipeline-stage { font-size: 11px; color: var(--ink-4); }
-    .pipeline-touch {
-      background: var(--bg-3);
-      border: 1px solid var(--line);
-      border-radius: var(--r-sm);
-      color: var(--ink-4);
-      font-size: 10px;
-      padding: 2px 7px;
-      cursor: pointer;
-      flex-shrink: 0;
-      transition: background 0.12s, color 0.12s;
-    }
-    .pipeline-touch:hover { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
-    .pipeline-age {
-      font-family: var(--mono);
-      font-size: 10px;
-      color: var(--ink-4);
-      min-width: 48px;
-      text-align: right;
-    }
-    .pipeline-age.stale { color: var(--neg); }
-    .pipeline-nudge {
-      margin-top: 12px;
-      padding: 10px 12px;
-      background: var(--accent-soft);
-      border-radius: var(--r-md);
-      font-size: 12px;
-      color: var(--ink-2);
-      line-height: 1.5;
-      border-left: 2px solid var(--accent);
-    }
-
-    /* ── JELS ── */
-    .jels-stat {
-      display: flex;
-      flex-direction: column;
-      gap: 2px;
-      padding: 10px 0;
-      border-bottom: 1px solid var(--line);
-    }
-    .jels-stat:last-child { border-bottom: none; }
-    .jels-stat-label { font-size: 10px; color: var(--ink-4); text-transform: uppercase; letter-spacing: 0.07em; }
-    .jels-stat-value { font-family: var(--serif); font-size: 22px; color: var(--ink); }
-    .jels-stat-sub { font-size: 11px; color: var(--ink-4); }
-    .jels-progress {
-      margin-top: 10px;
-      height: 5px;
-      background: var(--bg-3);
-      border-radius: 99px;
-      overflow: hidden;
-    }
-    .jels-progress-bar {
-      height: 100%;
-      background: var(--accent);
-      border-radius: 99px;
-      transition: width 0.6s ease;
-    }
-
     /* ── JOURNAL ── */
     .journal-prompt {
       font-family: var(--serif);
@@ -806,18 +684,8 @@
 
     <div class="band">The rest of the morning</div>
 
-    <!-- ── JOB SEARCH ── -->
-    <div class="card col-4">
-      <div class="card-label">
-        Job search · pipeline
-        <span class="card-label-badge" id="pipeline-badge">—</span>
-      </div>
-      <div class="pipeline-items" id="pipeline-content"></div>
-      <div class="pipeline-nudge" id="pipeline-nudge" style="display:none"></div>
-    </div>
-
     <!-- ── JOURNAL ── -->
-    <div class="card col-4">
+    <div class="card col-6">
       <div class="card-label">Journal nudge</div>
       <div class="journal-streak">
         <div class="journal-streak-num" id="journal-streak">—</div>
@@ -825,28 +693,6 @@
       </div>
       <div class="journal-prompt" id="journal-prompt">—</div>
       <div class="journal-window" id="journal-window"></div>
-    </div>
-
-    <!-- ── NYT GAMES ── -->
-    <div class="card col-4">
-      <div class="card-label">
-        Daily games
-        <span class="card-label-badge" id="streak-badge">—</span>
-      </div>
-      <div class="games-grid" id="games-grid"></div>
-      <div class="games-streak">
-        <div class="streak-num" id="streak-num">—</div>
-        <div class="streak-label">day streak · don't break it</div>
-      </div>
-    </div>
-
-    <!-- ── JELS PROJECT ── -->
-    <div class="card col-6">
-      <div class="card-label">
-        JELS expansion
-        <span class="card-label-badge" id="jels-countdown-badge">—</span>
-      </div>
-      <div id="jels-content"></div>
     </div>
 
     <!-- ── SLOW BURNS ── -->

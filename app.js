@@ -34,6 +34,27 @@ function todaySeed() {
   return d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate();
 }
 
+// ── Network helper ─────────────────────────────────────────────────────
+// Every live card goes through this. One retry after a short pause, because
+// the most common failure is a fetch firing before wifi is actually up
+// (iPad waking from sleep). All of these calls are reads with no side
+// effects, so retrying them is always safe.
+
+async function fetchRetry(url, tries = 2, delayMs = 2500) {
+  let lastErr;
+  for (let i = 0; i < tries; i++) {
+    try {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return res;
+    } catch (e) {
+      lastErr = e;
+      if (i < tries - 1) await new Promise(r => setTimeout(r, delayMs));
+    }
+  }
+  throw lastErr;
+}
+
 // ── Clock & Date ───────────────────────────────────────────────────────
 
 function initClock() {
@@ -89,7 +110,7 @@ async function loadWeather() {
     `&forecast_days=7`;
 
   try {
-    const res = await fetch(url);
+    const res = await fetchRetry(url);
     const d = await res.json();
     const c = d.current;
     const daily = d.daily;
@@ -170,7 +191,7 @@ async function loadWeather() {
 async function fetchESPN(league, teamId) {
   const url = `https://site.api.espn.com/apis/site/v2/sports/${league}/scoreboard`;
   try {
-    const res = await fetch(url);
+    const res = await fetchRetry(url);
     const d = await res.json();
     const events = d.events || [];
     return events.filter(e =>
@@ -288,199 +309,6 @@ async function loadSports() {
   }
 }
 
-// ── NYT Games ──────────────────────────────────────────────────────────
-// Done-state lives in localStorage keyed by today's date string.
-// Clicking a tile toggles done (without navigating); Shift+click opens the game.
-// Resets automatically when the date changes.
-
-function gamesStorageKey() {
-  const d = new Date();
-  return `games-done-${d.getFullYear()}-${d.getMonth()+1}-${d.getDate()}`;
-}
-
-function loadGamesDone() {
-  try {
-    const raw = localStorage.getItem(gamesStorageKey());
-    return raw ? JSON.parse(raw) : {};
-  } catch { return {}; }
-}
-
-function saveGamesDone(done) {
-  try { localStorage.setItem(gamesStorageKey(), JSON.stringify(done)); } catch {}
-}
-
-function renderGames() {
-  const { streak, games } = CONFIG.games;
-  const grid = $('games-grid');
-  const streakEl = $('streak-num');
-  const badge = $('streak-badge');
-  if (!grid) return;
-
-  const done = loadGamesDone();
-
-  const updateBadge = () => {
-    const d = loadGamesDone();
-    const count = games.filter(g => d[g.abbr]).length;
-    if (badge) badge.textContent = `${count}/${games.length} done today`;
-  };
-
-  grid.innerHTML = games.map(g => `
-    <div class="game-tile${done[g.abbr] ? ' done' : ''}"
-         data-abbr="${g.abbr}" data-url="${g.url}"
-         title="Click to mark done · Shift+click to open game">
-      <div class="game-abbr">${g.abbr}</div>
-      <div class="game-name">${g.name}</div>
-      <div class="game-status ${done[g.abbr] ? 'done' : 'play'}" id="game-status-${g.abbr}">
-        ${done[g.abbr] ? '✓ Done' : '● Play'}
-      </div>
-    </div>
-  `).join('');
-
-  // Click handler: shift+click opens, plain click toggles done
-  grid.querySelectorAll('.game-tile').forEach(tile => {
-    tile.addEventListener('click', e => {
-      if (e.shiftKey) {
-        window.open(tile.dataset.url, '_blank');
-        return;
-      }
-      const abbr = tile.dataset.abbr;
-      const d = loadGamesDone();
-      d[abbr] = !d[abbr];
-      saveGamesDone(d);
-      tile.classList.toggle('done', !!d[abbr]);
-      const statusEl = tile.querySelector('.game-status');
-      if (statusEl) {
-        statusEl.className = `game-status ${d[abbr] ? 'done' : 'play'}`;
-        statusEl.textContent = d[abbr] ? '✓ Done' : '● Play';
-      }
-      updateBadge();
-    });
-    tile.style.cursor = 'pointer';
-  });
-
-  if (streakEl) streakEl.textContent = streak;
-  updateBadge();
-}
-
-// ── JELS Expansion ─────────────────────────────────────────────────────
-
-function renderJELS() {
-  const el = $('jels-content');
-  const badge = $('jels-countdown-badge');
-  if (!el) return;
-
-  const { groundbreakingDate, openingDate, campaignGoal, campaignRaised, reserveTarget, reserveCurrent } = CONFIG.jels;
-
-  const now = new Date();
-  const groundbreaking = new Date(groundbreakingDate);
-  const opening = new Date(openingDate);
-
-  const daysToGroundbreaking = Math.ceil((groundbreaking - now) / (1000 * 60 * 60 * 24));
-  const daysToOpening = Math.ceil((opening - now) / (1000 * 60 * 60 * 24));
-
-  const campaignPct = Math.min(100, Math.round((campaignRaised / campaignGoal) * 100));
-  const reservePct  = Math.min(100, Math.round((reserveCurrent / reserveTarget) * 100));
-
-  if (badge) badge.textContent = `${daysToGroundbreaking}d to groundbreaking`;
-
-  el.innerHTML = `
-    <div class="jels-stat">
-      <div class="jels-stat-label">Groundbreaking</div>
-      <div class="jels-stat-value">${daysToGroundbreaking.toLocaleString()}<small style="font-size:14px;color:var(--ink-3)"> days</small></div>
-      <div class="jels-stat-sub">Target: ${groundbreaking.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}</div>
-    </div>
-    <div class="jels-stat">
-      <div class="jels-stat-label">Campaign raised</div>
-      <div class="jels-stat-value">$${campaignRaised.toLocaleString()}</div>
-      <div class="jels-stat-sub">of $${campaignGoal.toLocaleString()} goal · ${campaignPct}%</div>
-      <div class="jels-progress"><div class="jels-progress-bar" style="width:${campaignPct}%"></div></div>
-    </div>
-    <div class="jels-stat">
-      <div class="jels-stat-label">Pre-construction reserves</div>
-      <div class="jels-stat-value">$${reserveCurrent.toLocaleString()}</div>
-      <div class="jels-stat-sub">of $${reserveTarget.toLocaleString()} target · ${reservePct}%</div>
-      <div class="jels-progress"><div class="jels-progress-bar" style="width:${reservePct}%"></div></div>
-    </div>
-  `;
-}
-
-// ── Job Search Pipeline ─────────────────────────────────────────────────
-// Last-contact dates stored in localStorage as ISO date strings, keyed by org name.
-// "Touched today" button sets today's date. Days-ago calculated fresh each load.
-
-function pipelineStorageKey() { return 'pipeline-contacts'; }
-
-function loadContacts() {
-  try {
-    const raw = localStorage.getItem(pipelineStorageKey());
-    return raw ? JSON.parse(raw) : {};
-  } catch { return {}; }
-}
-
-function saveContact(org) {
-  const contacts = loadContacts();
-  contacts[org] = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
-  try { localStorage.setItem(pipelineStorageKey(), JSON.stringify(contacts)); } catch {}
-}
-
-function daysAgo(isoDate) {
-  if (!isoDate) return null;
-  const then = new Date(isoDate);
-  const now = new Date();
-  // Compare calendar dates only
-  const thenDate = new Date(then.getFullYear(), then.getMonth(), then.getDate());
-  const nowDate  = new Date(now.getFullYear(),  now.getMonth(),  now.getDate());
-  return Math.round((nowDate - thenDate) / 86400000);
-}
-
-function renderPipeline() {
-  const el = $('pipeline-content');
-  const nudgeEl = $('pipeline-nudge');
-  const badge = $('pipeline-badge');
-  if (!el) return;
-
-  const { pipeline, pipelineNudgeAfter } = CONFIG;
-  const contacts = loadContacts();
-
-  if (badge) badge.textContent = `${pipeline.filter(p => p.status === 'hot').length} hot`;
-
-  el.innerHTML = pipeline.map(p => {
-    const days = daysAgo(contacts[p.org]);
-    const ageLabel = days === null ? 'never' : days === 0 ? 'today' : `${days}d ago`;
-    const isStale = days === null || days >= pipelineNudgeAfter;
-    return `
-      <div class="pipeline-item">
-        <div class="pipeline-dot ${p.status}"></div>
-        <div class="pipeline-org">${p.org}</div>
-        <div class="pipeline-stage">${p.stage}</div>
-        <button class="pipeline-touch" data-org="${p.org}" title="Mark as contacted today">✓</button>
-        <div class="pipeline-age ${isStale && days !== 0 ? 'stale' : ''}">${ageLabel}</div>
-      </div>
-    `;
-  }).join('');
-
-  // Touch buttons
-  el.querySelectorAll('.pipeline-touch').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const org = btn.dataset.org;
-      saveContact(org);
-      renderPipeline(); // re-render to update ages
-    });
-  });
-
-  // Nudge for anything stale
-  const stale = pipeline.filter(p => {
-    const days = daysAgo(contacts[p.org]);
-    return days === null || days >= pipelineNudgeAfter;
-  });
-  if (stale.length > 0 && nudgeEl) {
-    nudgeEl.style.display = 'block';
-    nudgeEl.textContent = `${stale.map(p => p.org).join(', ')} ${stale.length === 1 ? 'has' : 'have'} gone quiet — worth a touch today?`;
-  } else if (nudgeEl) {
-    nudgeEl.style.display = 'none';
-  }
-}
-
 // ── Journal ────────────────────────────────────────────────────────────
 
 function renderJournal() {
@@ -570,7 +398,7 @@ async function loadOnThisDay() {
 
   try {
     const url = `https://en.wikipedia.org/api/rest_v1/feed/onthisday/events/${month}/${day}`;
-    const res = await fetch(url);
+    const res = await fetchRetry(url);
     const d = await res.json();
     const events = d.events || [];
 
@@ -629,9 +457,7 @@ async function loadBriefing() {
 
   try {
     // Add cache-busting so the browser doesn't serve yesterday's file
-    const res = await fetch(`${BRIEFING_URL}?t=${Date.now()}`);
-
-    if (!res.ok) throw new Error(`GitHub ${res.status}`);
+    const res = await fetchRetry(`${BRIEFING_URL}?t=${Date.now()}`);
 
     const briefing = await res.json();
     const today = new Date().toISOString().split('T')[0];
@@ -691,21 +517,49 @@ async function loadBriefing() {
 
 // ── Init ───────────────────────────────────────────────────────────────
 
-function init() {
-  initClock();
+// Cards that render instantly from config or the clock.
+function renderStatic() {
   renderDaySummary();
-  renderGames();
-  renderJELS();
-  renderPipeline();
   renderJournal();
   renderSlowBurns();
   renderCalendar();
+}
 
-  // Async / network-dependent
+// Cards that depend on the network. Safe to call again at any time.
+function loadLiveData() {
   loadWeather();
   loadSports();
   loadOnThisDay();
   loadBriefing(); // handles both briefing and sit-with
 }
+
+function init() {
+  initClock();
+  renderStatic();
+  loadLiveData();
+}
+
+// ── Refresh on return ──────────────────────────────────────────────────
+// The dashboard lives as a standalone app on the iPad, so a single page load
+// can sit open for days. Without this, a fetch that failed at 6am stays
+// failed until a manual reload. Re-pull whenever the app comes back to the
+// foreground, or when the device reconnects.
+
+let lastRefresh = Date.now();
+const REFRESH_COOLDOWN = 60 * 1000; // don't re-pull on quick app switches
+
+function refresh() {
+  lastRefresh = Date.now();
+  renderStatic();  // time-sensitive text (journal window, greeting)
+  loadLiveData();
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible') return;
+  if (Date.now() - lastRefresh < REFRESH_COOLDOWN) return;
+  refresh();
+});
+
+window.addEventListener('online', refresh);
 
 document.addEventListener('DOMContentLoaded', init);
