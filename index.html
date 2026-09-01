@@ -315,71 +315,48 @@
     .sit-cta:hover { border-color: var(--accent); }
 
     /* ── SPORTS ── */
-    .sport-game {
+    .sport-item {
+      display: block;
+      text-decoration: none;
+      padding: 9px 0;
       border-bottom: 1px solid var(--line);
-      padding: 10px 0;
     }
-    .sport-game:first-child { padding-top: 0; }
-    .sport-game:last-child { border-bottom: none; padding-bottom: 0; }
-    .sport-meta {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      margin-bottom: 6px;
-    }
-    .sport-league {
+    .sport-item:last-of-type { border-bottom: none; }
+    .sport-item-tag {
       font-size: 9px;
       font-weight: 700;
       letter-spacing: 0.1em;
       text-transform: uppercase;
       color: var(--ink-4);
+      margin-bottom: 3px;
     }
-    .sport-time {
-      font-family: var(--mono);
-      font-size: 10px;
-      color: var(--ink-4);
-    }
-    .sport-time.live { color: var(--neg); font-weight: 600; }
-    .sport-time.tonight { color: var(--accent); font-weight: 600; }
-    .sport-teams { display: flex; flex-direction: column; gap: 3px; }
-    .sport-team {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-    }
-    .sport-team-name { font-size: 13px; font-weight: 500; color: var(--ink-2); }
-    .sport-team-name.winner { color: var(--ink); font-weight: 600; }
-    .sport-team-score {
-      font-family: var(--mono);
-      font-size: 14px;
-      font-weight: 600;
+    .sport-item-title {
+      font-size: 13px;
+      font-weight: 500;
       color: var(--ink-2);
-    }
-    .sport-team-score.winner { color: var(--ink); }
-    .sport-note {
-      font-size: 11px;
-      color: var(--ink-4);
-      margin-top: 4px;
       line-height: 1.4;
     }
-
-    /* Sport wire ticker */
-    .sport-wire {
+    .sport-item:hover .sport-item-title { color: var(--accent); }
+    .sport-item-desc {
       font-size: 11.5px;
-      color: var(--ink-3);
-      line-height: 1.6;
-      border-top: 1px solid var(--line);
-      padding-top: 10px;
-      margin-top: 10px;
+      color: var(--ink-4);
+      line-height: 1.5;
+      margin-top: 2px;
     }
-    .wire-item { margin-bottom: 5px; }
-    .wire-tag {
+    .sport-empty {
+      font-size: 12.5px;
+      color: var(--ink-3);
+      font-style: italic;
+      padding: 4px 0;
+    }
+    .sport-credit {
       font-size: 9px;
-      font-weight: 700;
-      letter-spacing: 0.08em;
+      letter-spacing: 0.06em;
       text-transform: uppercase;
       color: var(--ink-4);
-      margin-right: 5px;
+      margin-top: 10px;
+      padding-top: 8px;
+      border-top: 1px solid var(--line);
     }
 
     /* ── CALENDAR ── */
@@ -673,7 +650,7 @@
       <div class="card">
         <div class="card-label">
           Your teams
-          <span class="card-label-badge" id="sports-teams-badge">CHC · DET · TOT · NU</span>
+          <span class="card-label-badge" id="sports-teams-badge">—</span>
         </div>
         <div id="sports-content" class="loading">Loading scores…</div>
       </div>

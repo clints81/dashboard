@@ -186,126 +186,53 @@ async function loadWeather() {
 }
 
 // ── Sports ─────────────────────────────────────────────────────────────
-// ESPN's public (undocumented) JSON API — no key required
-
-async function fetchESPN(league, teamId) {
-  const url = `https://site.api.espn.com/apis/site/v2/sports/${league}/scoreboard`;
-  try {
-    const res = await fetchRetry(url);
-    const d = await res.json();
-    const events = d.events || [];
-    return events.filter(e =>
-      e.competitions?.[0]?.competitors?.some(c => c.team?.id === String(teamId))
-    );
-  } catch { return []; }
-}
-
-async function fetchESPNTeamSchedule(sport, league, teamId) {
-  const url = `https://site.api.espn.com/apis/site/v2/sports/${sport}/${league}/teams/${teamId}/schedule?season=2025`;
-  try {
-    const res = await fetch(url);
-    const d = await res.json();
-    return d;
-  } catch { return null; }
-}
-
-function formatGameCard(game, teamLabel, abbr) {
-  if (!game) return '';
-  const comp = game.competitions?.[0];
-  if (!comp) return '';
-  const competitors = comp.competitors || [];
-  const home = competitors.find(c => c.homeAway === 'home');
-  const away = competitors.find(c => c.homeAway === 'away');
-  if (!home || !away) return '';
-
-  const status = comp.status?.type;
-  const isLive = status?.state === 'in';
-  const isFinal = status?.state === 'post';
-  const isToday = status?.state === 'pre' &&
-    new Date(comp.date).toDateString() === new Date().toDateString();
-
-  const gameTime = new Date(comp.date).toLocaleTimeString('en-US', {
-    hour: 'numeric', minute: '2-digit', hour12: true
-  });
-
-  const myTeamId = competitors.find(c =>
-    c.team?.abbreviation?.toUpperCase() === abbr.toUpperCase()
-  );
-  const myScore = myTeamId?.score;
-  const theirScore = competitors.find(c =>
-    c.team?.abbreviation?.toUpperCase() !== abbr.toUpperCase()
-  )?.score;
-
-  const homeWin = isFinal && parseInt(home.score) > parseInt(away.score);
-  const awayWin = isFinal && parseInt(away.score) > parseInt(home.score);
-
-  const statusLabel = isLive
-    ? `<span class="sport-time live">● LIVE · ${status.detail}</span>`
-    : isFinal
-    ? `<span class="sport-time">FINAL</span>`
-    : isToday
-    ? `<span class="sport-time tonight">TONIGHT · ${gameTime}</span>`
-    : `<span class="sport-time">${shortDate(new Date(comp.date))} · ${gameTime}</span>`;
-
-  const noteRaw = comp.notes?.[0]?.headline || comp.broadcasts?.[0]?.names?.[0] || '';
-  const note = noteRaw ? `<div class="sport-note">${noteRaw}</div>` : '';
-
-  return `
-    <div class="sport-game">
-      <div class="sport-meta">
-        <span class="sport-league">${abbr.includes('TOT') ? 'EPL' : game.sport?.toUpperCase() || ''} · ${teamLabel}</span>
-        ${statusLabel}
-      </div>
-      <div class="sport-teams">
-        <div class="sport-team">
-          <span class="sport-team-name${awayWin ? ' winner' : ''}">${away.team.displayName}</span>
-          ${isFinal || isLive ? `<span class="sport-team-score${awayWin ? ' winner' : ''}">${away.score}</span>` : ''}
-        </div>
-        <div class="sport-team">
-          <span class="sport-team-name${homeWin ? ' winner' : ''}">${home.team.displayName}</span>
-          ${isFinal || isLive ? `<span class="sport-team-score${homeWin ? ' winner' : ''}">${home.score}</span>` : ''}
-        </div>
-      </div>
-      ${note}
-    </div>
-  `;
-}
+// Team news from The Athletic's league RSS feeds, filtered and cached by the
+// Worker. Scores deliberately not shown — ESPN does that better and it wasn't
+// the thing worth opening an app for.
+//
+// The cap is the whole point of this card. Six items that end beats twenty
+// that don't; if it never runs out, it's a feed and we're back to scrolling.
 
 async function loadSports() {
   const el = $('sports-content');
+  const badge = $('sports-teams-badge');
   if (!el) return;
-  el.innerHTML = '<div class="loading">Loading scores…</div>';
+
+  const cap = CONFIG.sports?.maxItems ?? 6;
+  const url = CONFIG.sports?.url || 'https://briefing.clintsievers.workers.dev/sports';
 
   try {
-    const cards = [];
+    const res = await fetchRetry(url);
+    const data = await res.json();
 
-    // MLB: Cubs
-    const mlbCubs = await fetchESPN('baseball/mlb', '112');
-    const mlbTigers = await fetchESPN('baseball/mlb', '116');
-    // NFL: Lions
-    const nflLions = await fetchESPN('football/nfl', '8');
-    // NHL: Red Wings
-    const nhlRW = await fetchESPN('hockey/nhl', '17');
-    // EPL: Tottenham
-    const eplSpurs = await fetchESPN('soccer/eng.1', '18');
+    const teams  = data.teams  || [];
+    const league = data.league || [];
 
-    const cubsGame = mlbCubs[0];
-    const tigersGame = mlbTigers[0];
-    const lionsGame = nflLions[0];
-    const rwGame = nhlRW[0];
-    const spursGame = eplSpurs[0];
+    // Teams first. League stories only fill what's left over.
+    const items = [...teams, ...league.slice(0, Math.max(0, cap - teams.length))]
+      .slice(0, cap);
 
-    if (cubsGame)  cards.push(formatGameCard(cubsGame, 'Cubs', 'CHC'));
-    if (tigersGame) cards.push(formatGameCard(tigersGame, 'Tigers', 'DET'));
-    if (spursGame) cards.push(formatGameCard(spursGame, 'Tottenham', 'TOT'));
-    if (lionsGame) cards.push(formatGameCard(lionsGame, 'Lions', 'DET'));
-    if (rwGame)    cards.push(formatGameCard(rwGame, 'Red Wings', 'DET'));
+    if (!items.length) {
+      el.innerHTML = `<div class="sport-empty">Nothing on your teams today.</div>`;
+      if (badge) badge.textContent = 'clear';
+      return;
+    }
 
-    el.innerHTML = cards.filter(Boolean).join('') ||
-      '<div class="loading">No games found for your teams today.</div>';
+    if (badge) {
+      const n = teams.length;
+      badge.textContent = n ? `${n} on your teams` : 'league only';
+    }
 
-  } catch(e) {
-    el.innerHTML = '<div class="error">Scores unavailable</div>';
+    el.innerHTML = items.map(it => `
+      <a class="sport-item" href="${it.url}" target="_blank" rel="noopener">
+        <div class="sport-item-tag">${it.team || it.league}</div>
+        <div class="sport-item-title">${it.title}</div>
+        ${it.desc ? `<div class="sport-item-desc">${it.desc}</div>` : ''}
+      </a>
+    `).join('') + `<div class="sport-credit">via The Athletic</div>`;
+
+  } catch (e) {
+    el.innerHTML = `<div class="error">Team news unavailable</div>`;
   }
 }
 

@@ -14,23 +14,14 @@ const CONFIG = {
     timezone: "America/Chicago",
   },
 
-  // ── Sports — your followed teams ────────────
-  // ESPN's undocumented API pulls live scores automatically.
-  // Just keep this list current with your teams.
+  // ── Sports — team news ──────────────────────
+  // Which teams get matched lives in the Worker (that's where filtering
+  // happens). This is display only.
+  //   maxItems: hard cap. Keep it low on purpose — a card that ends is the
+  //   whole reason this exists instead of just opening The Athletic.
   sports: {
-    teams: [
-      { league: "mlb",  espnId: "112",  label: "Cubs",         abbr: "CHC" },
-      { league: "mlb",  espnId: "116",  label: "Tigers",       abbr: "DET" },
-      { league: "nfl",  espnId: "8",    label: "Lions",        abbr: "DET" },
-      { league: "nhl",  espnId: "17",   label: "Red Wings",    abbr: "DET" },
-      { league: "soccer/usa.mls", espnId: null, label: "— no MLS team", abbr: null },
-    ],
-    // College teams use different lookup
-    college: [
-      { label: "Northwestern Wildcats", search: "Northwestern" },
-    ],
-    // EPL team
-    epl: { espnId: "18", label: "Tottenham", abbr: "TOT" },
+    url: "https://briefing.clintsievers.workers.dev/sports",
+    maxItems: 6,
   },
 
   // ── Orangetheory daily workout ──────────────
