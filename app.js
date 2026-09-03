@@ -430,6 +430,90 @@ async function loadCalendar() {
   }
 }
 
+// ── JELC treasurer tasks ───────────────────────────────────────────────
+// Worker /tasks route. The Worker holds NOTION_TOKEN and does the querying,
+// because the browser can neither hold the token nor fetch api.notion.com
+// cross-origin. Two sections: what's due (overdue + next 7 days) and what
+// was recently settled (due in the last 7 days and now Paid/Complete).
+
+function tasksDueLabel(t) {
+  if (t.overdue)          return `${Math.abs(t.daysUntil)}d overdue`;
+  if (t.daysUntil === 0)  return 'due today';
+  if (t.daysUntil === 1)  return 'due tomorrow';
+  if (t.daysUntil == null) return '';
+  return `in ${t.daysUntil}d`;
+}
+
+async function loadTasks() {
+  const el = $('tasks-content');
+  const badge = $('tasks-badge');
+  if (!el) return;
+
+  const url = CONFIG.tasks?.url || 'https://briefing.clintsievers.workers.dev/tasks';
+
+  try {
+    const res = await fetchRetry(`${url}?t=${Date.now()}`);
+    const data = await res.json();
+
+    // A non-ok sources block means the token expired or the integration lost
+    // access — that must NOT look like a quiet week. Fail loudly instead.
+    const notionOk = (data.sources?.notion || '').startsWith('ok');
+    if (!notionOk) {
+      el.innerHTML = `<div class="error">Tasks unavailable</div>`;
+      if (badge) badge.textContent = '—';
+      return;
+    }
+
+    const due = data.due || [];
+    const done = data.done || [];
+    const overdue = data.counts?.overdue || 0;
+
+    if (badge) {
+      badge.textContent = due.length
+        ? (overdue ? `${overdue} overdue` : `${due.length} due`)
+        : 'clear';
+    }
+
+    if (!due.length && !done.length) {
+      el.innerHTML = `<div class="tasks-empty">Nothing due in the next 7 days.</div>`;
+      return;
+    }
+
+    const dueRows = due.map(t => `
+      <a class="task-row${t.overdue ? ' task-overdue' : ''}" href="${escapeHTML(t.url || '#')}" target="_blank" rel="noopener">
+        <div class="task-main">
+          <div class="task-title">${escapeHTML(t.title || 'Untitled')}</div>
+          ${t.category ? `<div class="task-cat">${escapeHTML(t.category)}</div>` : ''}
+        </div>
+        <div class="task-due${t.overdue ? ' task-due-over' : ''}">${escapeHTML(tasksDueLabel(t))}</div>
+      </a>`).join('');
+
+    const doneRows = done.map(t => `
+      <a class="task-row task-done" href="${escapeHTML(t.url || '#')}" target="_blank" rel="noopener">
+        <div class="task-main">
+          <div class="task-title">${escapeHTML(t.title || 'Untitled')}</div>
+          ${t.category ? `<div class="task-cat">${escapeHTML(t.category)}</div>` : ''}
+        </div>
+        <div class="task-settled">${escapeHTML(t.status || 'Done')}</div>
+      </a>`).join('');
+
+    el.innerHTML = `
+      <div class="tasks-col">
+        <div class="tasks-subhead">Due</div>
+        ${due.length ? dueRows : `<div class="tasks-empty">Nothing due.</div>`}
+      </div>
+      <div class="tasks-col">
+        <div class="tasks-subhead">Recently settled</div>
+        ${done.length ? doneRows : `<div class="tasks-empty">Nothing settled this week.</div>`}
+      </div>`;
+
+  } catch (e) {
+    // Distinct from an empty week — a failed fetch must not read as "clear".
+    el.innerHTML = `<div class="error">Tasks unavailable</div>`;
+    if (badge) badge.textContent = '—';
+  }
+}
+
 // ── Orangetheory daily workout ─────────────────────────────────────────
 // Reddit blocks programmatic reads of its JSON endpoints (search.json returns
 // "blocked by network security" even from a plain browser tab), so there's no
@@ -542,6 +626,7 @@ function loadLiveData() {
   loadWeather();
   loadSports();
   loadCalendar();
+  loadTasks();
   loadOnThisDay();
   loadBriefing(); // handles both briefing and sit-with
 }

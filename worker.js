@@ -646,11 +646,203 @@ const CALENDAR = (() => {
   return { handle };
 })();
 
+// ═══════════════════════════════════════════════════════════════════════
+//  /tasks route — JELC treasurer tasks from Notion
+// ═══════════════════════════════════════════════════════════════════════
+//
+//  SAVE A COPY OF THE WORKER BEFORE PASTING THIS. (Git now holds the
+//  history — commit worker.js first, then paste this whole file into the
+//  Cloudflare editor and deploy. Never edit in the Cloudflare editor, or
+//  the deployed Worker and the repo drift apart.)
+//
+//  One top-level name — TASKS — plus one router line below, alongside the
+//  /sports and /calendar cases:
+//
+//      if (url.pathname === '/tasks') return TASKS.handle(request, env);
+//
+//  Environment (Settings → Variables and Secrets, separate from the code
+//  editor, no redeploy needed to change):
+//
+//      NOTION_TOKEN   integration token, stored as a Secret. A 404 from the
+//                     query almost always means the integration hasn't been
+//                     granted access to the database, not a bad ID.
+//
+//  Notion facts (verified 2026-09-03, do not substitute from memory):
+//    - The 2025-09-03 API moved queries onto /v1/data_sources/{id}/query.
+//      The id below is the DATA SOURCE id, not the id in the Notion URL.
+//    - `Completion Date` is empty on every row — do NOT build "settled" on
+//      it. "Recently settled" = due in the last 7 days AND now Paid/Complete.
+//    - `Days Left`, `Priority`, `Due In`, `Archive?`, `Auto Due Date` are
+//      formulas, not exposed to the query layer. daysUntil is computed here.
+// ═══════════════════════════════════════════════════════════════════════
+
+const TASKS = (() => {
+  const TZ = 'America/Chicago';
+  const CACHE_SECONDS = 300;
+  const DATA_SOURCE_ID = '1a0f8d21-7e64-8041-96ed-000b1d9f7f86';
+  const NOTION_VERSION = '2025-09-03';
+  const DAY_MS = 24 * 60 * 60 * 1000;
+
+  // "Today" as the Chicago calendar date, anchored to UTC midnight so day
+  // arithmetic below is plain integer math. The /calendar block does the
+  // same thing with its dateStrIn helper; this is the minimal version.
+  function chicagoToday() {
+    const p = {};
+    const dtf = new Intl.DateTimeFormat('en-US', {
+      timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit',
+    });
+    for (const { type, value } of dtf.formatToParts(Date.now())) {
+      if (type !== 'literal') p[type] = value;
+    }
+    return { y: +p.year, m: +p.month, d: +p.day };
+  }
+
+  const ymd = ms => new Date(ms).toISOString().slice(0, 10); // ms is a UTC-midnight instant
+
+  async function query(env, body) {
+    try {
+      const res = await fetch(
+        `https://api.notion.com/v1/data_sources/${DATA_SOURCE_ID}/query`,
+        {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${env.NOTION_TOKEN}`,
+            'Notion-Version': NOTION_VERSION,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ ...body, page_size: 100 }),
+        }
+      );
+      if (!res.ok) return { ok: false, status: `HTTP ${res.status}` };
+      const json = await res.json();
+      return { ok: true, rows: json.results || [] };
+    } catch (e) {
+      return { ok: false, status: `error: ${e.message}` };
+    }
+  }
+
+  // ── Property extraction — names are exact, from the live schema ─────────
+  const titleOf   = p => (p?.['Task Name']?.title || []).map(t => t.plain_text).join('').trim();
+  const dueOf     = p => p?.['Due Date']?.date?.start?.slice(0, 10) || null;
+  const statusOf  = p => p?.['Status']?.status?.name || '';
+  const catOf     = p => p?.['Category']?.select?.name || '';
+
+  function build(todayMs, todayStr, a, b) {
+    // Query A — overdue plus the next 7 days, not yet settled. No lower
+    // bound on the date is deliberate: that's what lets overdue through.
+    const due = a.rows.map(page => {
+      const due = dueOf(page.properties);
+      const daysUntil = due
+        ? Math.round((Date.UTC(+due.slice(0, 4), +due.slice(5, 7) - 1, +due.slice(8, 10)) - todayMs) / DAY_MS)
+        : null;
+      return {
+        title: titleOf(page.properties),
+        due,
+        daysUntil,
+        overdue: daysUntil !== null && daysUntil < 0,
+        status: statusOf(page.properties),
+        category: catOf(page.properties),
+        url: page.url,
+      };
+    });
+
+    // Query B — due in the last 7 days and now Paid/Complete.
+    const done = b.rows.map(page => ({
+      title: titleOf(page.properties),
+      due: dueOf(page.properties),
+      status: statusOf(page.properties),
+      category: catOf(page.properties),
+      url: page.url,
+    }));
+
+    return {
+      date: todayStr,
+      timezone: TZ,
+      due,
+      done,
+      counts: { due: due.length, overdue: due.filter(t => t.overdue).length, done: done.length },
+      // Required, same lesson as /sports and /calendar: an expired token, a
+      // revoked integration, and a genuinely clear week must not look alike.
+      sources: { notion: a.ok && b.ok ? `ok (${a.rows.length + b.rows.length} rows)` : (a.status || b.status) },
+      generated: new Date().toISOString(),
+    };
+  }
+
+  async function handle(request, env) {
+    const cors = {
+      'access-control-allow-origin': '*',
+      'access-control-allow-methods': 'GET, OPTIONS',
+      'content-type': 'application/json; charset=utf-8',
+    };
+
+    if (request.method === 'OPTIONS') return new Response(null, { headers: cors });
+    if (request.method !== 'GET') {
+      return new Response(JSON.stringify({ error: 'GET only' }), { status: 405, headers: cors });
+    }
+
+    // Cache keyed on the full URL, so /tasks?t=N forces a rebuild.
+    const cache = caches.default;
+    const cacheKey = new Request(new URL(request.url).toString(), { method: 'GET' });
+    const hit = await cache.match(cacheKey);
+    if (hit) return hit;
+
+    // ?date=YYYY-MM-DD points the route at another day, for verifying the
+    // filters without waiting for a morning to arrive.
+    const q = new URL(request.url).searchParams.get('date');
+    let today;
+    if (/^\d{4}-\d{2}-\d{2}$/.test(q || '')) {
+      today = { y: +q.slice(0, 4), m: +q.slice(5, 7), d: +q.slice(8, 10) };
+    } else {
+      today = chicagoToday();
+    }
+    const todayMs  = Date.UTC(today.y, today.m - 1, today.d);
+    const todayStr = ymd(todayMs);
+    const plus7    = ymd(todayMs + 7 * DAY_MS);
+    const minus7   = ymd(todayMs - 7 * DAY_MS);
+
+    const [a, b] = await Promise.all([
+      query(env, {
+        filter: {
+          and: [
+            { property: 'Due Date', date: { on_or_before: plus7 } },
+            { property: 'Status', status: { does_not_equal: 'Paid' } },
+            { property: 'Status', status: { does_not_equal: 'Complete' } },
+          ],
+        },
+        sorts: [{ property: 'Due Date', direction: 'ascending' }],
+      }),
+      query(env, {
+        filter: {
+          and: [
+            { property: 'Due Date', date: { on_or_after: minus7 } },
+            { property: 'Due Date', date: { on_or_before: todayStr } },
+            { or: [
+              { property: 'Status', status: { equals: 'Paid' } },
+              { property: 'Status', status: { equals: 'Complete' } },
+            ]},
+          ],
+        },
+        sorts: [{ property: 'Due Date', direction: 'descending' }],
+      }),
+    ]);
+
+    const data = build(todayMs, todayStr, a, b);
+    const res = new Response(JSON.stringify(data), {
+      headers: { ...cors, 'cache-control': `public, max-age=${CACHE_SECONDS}` },
+    });
+    await cache.put(cacheKey, res.clone());
+    return res;
+  }
+
+  return { handle };
+})();
+
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
     if (url.pathname === '/sports') return handleSports(request, ctx);
-    if (url.pathname === '/calendar') return CALENDAR.handle(request, env); 
+    if (url.pathname === '/calendar') return CALENDAR.handle(request, env);
+    if (url.pathname === '/tasks') return TASKS.handle(request, env);
 
     const cors = {
       "Access-Control-Allow-Origin": "*",

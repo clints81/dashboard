@@ -393,6 +393,56 @@
       font-style: italic;
       padding: 4px 0;
     }
+
+    /* ── TREASURER TASKS ── */
+    #tasks-content {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+    }
+    .tasks-subhead {
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--ink-4);
+      margin-bottom: 6px;
+    }
+    .task-row {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 7px 0;
+      border-bottom: 1px solid var(--line);
+      text-decoration: none;
+    }
+    .task-row:last-child { border-bottom: none; }
+    .task-title { font-size: 13px; color: var(--ink-2); line-height: 1.35; }
+    .task-cat { font-size: 11px; color: var(--ink-4); margin-top: 1px; }
+    .task-due {
+      font-size: 11px;
+      color: var(--ink-3);
+      white-space: nowrap;
+      font-variant-numeric: tabular-nums;
+    }
+    .task-due-over { color: var(--neg); font-weight: 600; }
+    .task-overdue .task-title { color: var(--neg); }
+    .task-settled {
+      font-size: 11px;
+      color: var(--pos);
+      white-space: nowrap;
+    }
+    .task-done .task-title { color: var(--ink-3); }
+    .tasks-empty {
+      font-size: 12.5px;
+      color: var(--ink-3);
+      font-style: italic;
+      padding: 4px 0;
+    }
+    @media (max-width: 700px) {
+      #tasks-content { grid-template-columns: 1fr; gap: 14px; }
+    }
     .now-pill {
       display: inline-block;
       font-size: 9px;
@@ -696,6 +746,17 @@
     </div>
 
     <div class="band">The rest of the morning</div>
+
+    <!-- ── TREASURER TASKS (col 12) ── -->
+    <div class="card col-12">
+      <div class="card-label">
+        Treasurer tasks
+        <span class="card-label-badge" id="tasks-badge">—</span>
+      </div>
+      <div id="tasks-content">
+        <div class="loading">Loading tasks…</div>
+      </div>
+    </div>
 
     <!-- ── JOURNAL ── -->
     <div class="card col-6">
