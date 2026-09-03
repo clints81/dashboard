@@ -19,17 +19,21 @@ Repo files:
 
 ## The Worker
 
-`briefing.clintsievers.workers.dev` is a Cloudflare Worker Clint owns. It is a single file, edited and deployed through the Cloudflare dashboard editor (not wrangler, not in git — **keep a copy of the source before editing, there is no version history**).
+`briefing.clintsievers.workers.dev` is a Cloudflare Worker Clint owns. It is a single file that is deployed by pasting into the Cloudflare dashboard editor (not wrangler). The source now lives in the repo as **`worker.js`** — so the flow is: edit `worker.js`, commit, then paste the whole file into the Cloudflare editor and deploy. Git holds the history, so the old "keep a copy before editing" step is gone. **Never edit in the Cloudflare editor directly** — the deployed Worker and the repo would drift apart, and the next paste silently reverts the change.
 
-It serves two things:
+It serves these routes:
 
 | Route | Method | What it does |
 |---|---|---|
 | `/` | GET | Returns the latest briefing JSON from KV (`env.BRIEFING`, key `latest`). CORS `*`. |
 | `/` | PUT | Writes briefing JSON to KV. Requires `X-Write-Key` header matching `env.WRITE_KEY`. |
 | `/sports` | GET | Fetches, filters, and caches team/league news from RSS. CORS `*`. 20-min cache. |
+| `/calendar` | GET | Parses ICS calendar feeds (`env.CAL_ICS_1` / `CAL_ICS_2`) for today's events. CORS `*`. 5-min cache. |
+| `/tasks` | GET | Queries the JELC treasurer Notion database (`env.NOTION_TOKEN`) for what's due and recently settled. CORS `*`. 5-min cache. |
 
-Write key lives in 1Password and in the briefing skill text. Never in the repo.
+Write key lives in 1Password and in the briefing skill text. Never in the repo. The other secrets (`CAL_ICS_1`, `NOTION_TOKEN`) live in Cloudflare → Settings → Variables and Secrets, separate from the code editor.
+
+Each route is one top-level name in `worker.js` (`handleSports`, `CALENDAR`, `TASKS`) plus one line in the `fetch` router. Follow that convention when adding a route — it's what keeps per-route constants (each block has its own `CACHE_SECONDS`) from colliding.
 
 ### Why a Worker exists at all
 The dashboard is served from `clints81.github.io`. Browsers refuse to let a page read a response from another origin unless that origin sends CORS headers saying it's allowed. Notion doesn't. `nytimes.com` doesn't. Server-side fetches aren't subject to that rule, so the Worker fetches on the dashboard's behalf and re-serves the result with `access-control-allow-origin: *`.
@@ -45,8 +49,10 @@ This is also why GitHub was abandoned as the delivery route: `git push` and GitH
 - **Sports** — Worker `/sports` route. See below.
 - **On This Day** — Wikipedia `/feed/onthisday/events/{month}/{day}`. 4 events, seeded daily random.
 - **Briefing** — Worker root route. Written each morning by the Cowork briefing skill.
+- **Calendar** — Worker `/calendar` route. Today's events from Google/iCloud ICS feeds. See below.
+- **Treasurer tasks** — Worker `/tasks` route. JELC tasks from Notion. See below.
 
-All four go through `fetchRetry()` in `app.js`: one retry after 2.5s, and a non-200 is treated as failure rather than parsed as JSON.
+All of these go through `fetchRetry()` in `app.js`: one retry after 2.5s, and a non-200 is treated as failure rather than parsed as JSON.
 
 ### Static (config.js)
 - Journal streak, journal prompts (one picked per day by day-of-year), window close time
@@ -101,6 +107,38 @@ Scores are deliberately not shown. ESPN and The Athletic do that better, and sco
 
 ---
 
+## The calendar route
+
+`/calendar` fetches ICS feeds (`env.CAL_ICS_1` = Google's secret iCal URL; `env.CAL_ICS_2` = an iCloud slot, wired and currently **unset**) and returns today's events. The browser can't do this itself — it can neither hold the secret URL nor fetch `calendar.google.com` cross-origin.
+
+Load-bearing details, learned the hard way:
+- **Times are wall-clock in `America/Chicago`, not UTC.** The block converts a zoned time to a UTC instant by guessing, measuring the error, and correcting (two passes settles DST boundaries). This is why a 9am standing meeting stays 9am after the November clock change.
+- **All-day events keep their raw `YYYYMMDD` date string.** Round-tripping them through a UTC instant is how all-day events end up on the wrong day. The date is the fact, not the timestamp.
+- **ICS lines fold** at 75 octets (a continuation line starts with space/tab); unfold before parsing or long titles arrive truncated.
+- The `sources` block reports each feed as `ok (N in file, M today)`, `unset`, `HTTP nnn`, `not-ics`, or `error: …` — same rule as `/sports`: a blocked feed and a genuinely empty day must not produce identical JSON.
+- `?date=YYYY-MM-DD` points the route at another day, for verifying parsing without waiting for a morning.
+
+## The tasks route
+
+`/tasks` queries the JELC treasurer Notion database and returns two lists — what's **due** and what was **recently settled**. `app.js` renders it as the Treasurer tasks card.
+
+### Notion API facts — verified 2026-09-03, do not substitute from memory
+- The 2025-09-03 API moved database queries onto **`/v1/data_sources/{id}/query`** (was `/databases/{id}/query`). The id used here is the **data source** id (`1a0f8d21-7e64-8041-96ed-000b1d9f7f86`), which is **not** the id in the Notion URL. Header `Notion-Version: 2025-09-03`, auth `Bearer ${env.NOTION_TOKEN}`.
+- A **404 almost always means the integration wasn't granted access** to the database (fix in Notion → database → ••• → Connections), not a bad id. Notion reports missing permission as a missing object.
+- **`Completion Date` is empty on every row** — it was meant to auto-fill and doesn't. Building "recently settled" on it produces a permanently empty section that looks like a quiet week. So "settled" = *due in the last 7 days and now `Paid`/`Complete`.*
+- **`Days Left`, `Priority`, `Due In`, `Archive?`, `Auto Due Date` are Notion formulas** and aren't exposed to the query layer. `daysUntil` is computed in the Worker from `Due Date` (in `America/Chicago`).
+
+### The two queries
+- **Due** — `Due Date on_or_before today+7`, `Status ≠ Paid`, `Status ≠ Complete`, ascending. There is **deliberately no lower date bound** — that's what lets overdue items through (a January task still Open must surface, not hide).
+- **Settled** — `Due Date` between `today−7` and `today`, `Status = Paid or Complete`, descending. A task paid late drops off, which is a visible failure rather than a silent one.
+
+### The rest
+- **CORS is open (`*`)**, matching the other routes. Confirmed with Clint (2026-09-03): the dashboard is a public browser page, so no client-sent key or origin lock is real security anyway — the realistic choice was "openly public vs. public-behind-an-obscure-URL," and open won for consistency and curl-debuggability.
+- The `sources.notion` block is required: `ok (N rows)`, `HTTP 401` (bad/missing token), `HTTP 404` (integration lacks access), or `error: …`. `loadTasks()` fails loudly to an "unavailable" state when it isn't `ok`, so an expired token never reads as a clear week.
+- 5-min cache keyed on the full URL; `?t=N` or `?date=YYYY-MM-DD` force a rebuild / test another day.
+
+---
+
 ## The briefing system
 
 Two Cowork skills, cloud-hosted, scheduled:
@@ -133,7 +171,8 @@ Cowork has an editable egress allowlist. News source domains get added there. Th
 | Something to sit with | Worker `/` | config.js fallback |
 | Your teams | Worker `/sports` | Team news, no scores |
 | Today's workout | Static link | See below |
-| Today (calendar) | Not wired | Scaffolded only |
+| Today (calendar) | Worker `/calendar` | Live; ICS feeds, Chicago time |
+| Treasurer tasks | Worker `/tasks` | Live; JELC Notion, due + settled |
 | Journal nudge | config.js | |
 | Slow burns | config.js | |
 | On this day | Wikipedia | Live |
@@ -175,8 +214,8 @@ Before filtering on any field, ask whether it carries the meaning you think it d
 ---
 
 ## Backlog
-- Google Calendar integration; Apple Calendar if feasible
-- Notion church tasks
+- ~~Google Calendar integration~~ — **done** via `/calendar`. Apple/iCloud still pending: the `CAL_ICS_2` slot is wired and unset.
+- ~~Notion church tasks~~ — **done** via `/tasks` (Treasurer tasks card).
 - JELC Council numbers (pulled from the JELC Council dashboard, not hand-maintained)
 - Daily Bible verse
 - Personal daily brief alongside the news briefing
@@ -186,7 +225,7 @@ Before filtering on any field, ask whether it carries the meaning you think it d
 - Day summary sentence is still static; improves once Calendar is wired
 - Decide whether league fill earns its slots, or whether the card should be allowed to go short
 - Cleaner Worker URL via a `clintsievers.com` subdomain (deliberately deferred)
-- Consider wrangler + git for the Worker once it outgrows one editor screen
+- ~~git for the Worker~~ — **done**, source is now `worker.js` in the repo. Consider wrangler too once it outgrows one editor screen (deploy is still a manual paste into the Cloudflare editor).
 
 ---
 
