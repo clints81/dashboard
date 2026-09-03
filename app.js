@@ -40,6 +40,11 @@ function todaySeed() {
 // (iPad waking from sleep). All of these calls are reads with no side
 // effects, so retrying them is always safe.
 
+function escapeHTML(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
 async function fetchRetry(url, tries = 2, delayMs = 2500) {
   let lastErr;
   for (let i = 0; i < tries; i++) {
@@ -349,21 +354,80 @@ async function loadOnThisDay() {
 // Phase 2: wire to Google Calendar API
 // For now: placeholder with instructions
 
-function renderCalendar() {
+// ── Calendar ───────────────────────────────────────────────────────────
+// Worker /calendar route. The Worker holds the secret .ics URL and does the
+// recurrence expansion, because the browser can neither hold a secret nor
+// fetch calendar.google.com cross-origin.
+
+// Calendar locations are often a bare meeting URL. Rendering that as text
+// puts 90 characters of query string in a card five columns wide, so link
+// it and label it by host instead. Anything that is not an http(s) URL is
+// a real place and gets shown as written.
+function locationHTML(loc) {
+  let u;
+  try { u = new URL(loc); } catch { return escapeHTML(loc); }
+  if (u.protocol !== 'http:' && u.protocol !== 'https:') return escapeHTML(loc);
+
+  const host = u.hostname.replace(/^www\./, '');
+  const known = { 'zoom.us': 'Zoom', 'meet.google.com': 'Meet',
+                  'teams.microsoft.com': 'Teams', 'teams.live.com': 'Teams' };
+  const label = Object.keys(known).find(k => host === k || host.endsWith('.' + k));
+
+  return `<a class="cal-link" href="${escapeHTML(u.href)}" target="_blank" rel="noopener">`
+       + `${escapeHTML(label ? known[label] : host)} \u2197</a>`;
+}
+
+async function loadCalendar() {
   const el = $('cal-content');
   const badge = $('cal-badge');
   if (!el) return;
 
-  el.innerHTML = `
-    <div class="cal-item">
-      <div class="cal-time">—</div>
-      <div>
-        <div class="cal-title">Google Calendar not connected</div>
-        <div class="cal-sub">Nothing scheduled here yet</div>
-      </div>
-    </div>
-  `;
-  if (badge) badge.textContent = '— events';
+  const url = CONFIG.calendar?.url || 'https://briefing.clintsievers.workers.dev/calendar';
+
+  try {
+    const res = await fetchRetry(url);
+    const data = await res.json();
+    const events = data.events || [];
+
+    if (!events.length) {
+      el.innerHTML = `<div class="cal-empty">Nothing on the calendar today.</div>`;
+      if (badge) badge.textContent = 'clear';
+      return;
+    }
+
+    if (badge) badge.textContent = `${events.length} ${events.length === 1 ? 'event' : 'events'}`;
+
+    const now = Date.now();
+
+    el.innerHTML = events.map(ev => {
+      const start = ev.start ? new Date(ev.start) : null;
+      const end   = ev.end   ? new Date(ev.end)   : null;
+
+      const isNow = start && end && now >= start.getTime() && now < end.getTime();
+      const isPast = end ? now >= end.getTime() : (start ? now >= start.getTime() : false);
+
+      const time = ev.allDay
+        ? 'all day'
+        : start.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
+            .replace(' AM', 'a').replace(' PM', 'p');
+
+      return `
+        <div class="cal-item${isNow ? ' now' : ''}"${isPast && !isNow ? ' style="opacity:0.45"' : ''}>
+          <div class="cal-time${isNow ? ' now-time' : ''}">${time}</div>
+          <div>
+            <div class="cal-title">${escapeHTML(ev.title)}${isNow ? '<span class="now-pill">now</span>' : ''}</div>
+            ${ev.location ? `<div class="cal-sub">${locationHTML(ev.location)}</div>` : ''}
+          </div>
+        </div>
+      `;
+    }).join('');
+
+  } catch (e) {
+    // An error state has to be visually distinct from an empty day, or a
+    // failed fetch reads as a free morning.
+    el.innerHTML = `<div class="error">Calendar unavailable</div>`;
+    if (badge) badge.textContent = '—';
+  }
 }
 
 // ── Orangetheory daily workout ─────────────────────────────────────────
@@ -470,7 +534,6 @@ function renderStatic() {
   renderDaySummary();
   renderJournal();
   renderSlowBurns();
-  renderCalendar();
   renderWorkout();
 }
 
@@ -478,6 +541,7 @@ function renderStatic() {
 function loadLiveData() {
   loadWeather();
   loadSports();
+  loadCalendar();
   loadOnThisDay();
   loadBriefing(); // handles both briefing and sit-with
 }
