@@ -30,6 +30,7 @@ It serves these routes:
 | `/sports` | GET | Fetches, filters, and caches team/league news from RSS. CORS `*`. 20-min cache. |
 | `/calendar` | GET | Parses ICS calendar feeds (`env.CAL_ICS_1` / `CAL_ICS_2`) for today's events. CORS `*`. 5-min cache. |
 | `/tasks` | GET | Queries the JELC treasurer Notion database (`env.NOTION_TOKEN`) for what's due and recently settled. CORS `*`. 5-min cache. |
+| `/devotion` | GET | Fetches the WELS Daily Devotions RSS feed and extracts verse, reference, title, excerpt. No secret. CORS `*`. 3-hr cache. |
 
 Write key lives in 1Password and in the briefing skill text. Never in the repo. The other secrets (`CAL_ICS_1`, `NOTION_TOKEN`) live in Cloudflare → Settings → Variables and Secrets, separate from the code editor.
 
@@ -51,6 +52,7 @@ This is also why GitHub was abandoned as the delivery route: `git push` and GitH
 - **Briefing** — Worker root route. Written each morning by the Cowork briefing skill.
 - **Calendar** — Worker `/calendar` route. Today's events from Google/iCloud ICS feeds. See below.
 - **Treasurer tasks** — Worker `/tasks` route. JELC tasks from Notion. See below.
+- **Daily devotion** — Worker `/devotion` route. WELS Daily Devotions RSS. See below.
 
 All of these go through `fetchRetry()` in `app.js`: one retry after 2.5s, and a non-200 is treated as failure rather than parsed as JSON.
 
@@ -139,6 +141,22 @@ Load-bearing details, learned the hard way:
 
 ---
 
+## The devotion route
+
+`/devotion` fetches the official **WELS Daily Devotions** RSS feed (`wels.net/dev-daily/feed/pt-dev-daily`) server-side — the browser can't read `wels.net` cross-origin — and returns the day's verse, scripture reference, devotion title, and a short excerpt, plus a read link (the item page) and a listen link (the mp3 enclosure). No key or secret; it's a public feed. This is the "sourced, not random" answer to wanting a daily verse: it's official WELS material, curated daily.
+
+Each feed item follows a fixed template, which is what makes extraction reliable:
+- **First paragraph is the scripture** — verse text, then the reference on its own line (a `<br>`). The parser takes the first non-boilerplate paragraph as the verse and pulls the reference off the last line (falling back to a reference regex). Verified against all 14 items in the feed at build time — refs include ranges (`Matthew 16:21-25`) and multi-verse (`Romans 8:19,22`).
+- **The next paragraph is the reflection**; the excerpt is its first ~2 sentences (capped ~240 chars).
+- **Boilerplate is skipped** — "Listen to Devotion", the WELS attribution, the Creative Commons line, and the NIV copyright line are filtered by prefix.
+- Title comes from the item `<title>` ("Saved In Hope – September 3, 2026") split on the dash; audio from the `<enclosure>` url.
+- `sources.wels` is `ok`, `parse-miss` (fetched but no verse found), `no-items`, `HTTP nnn`, or `error: …`. `loadDevotion()` fails to an "unavailable" state when it isn't `ok`.
+- 3-hour cache (devotions update once a day, ~05:30 UTC); `?t=N` forces a rebuild.
+
+If the WELS template ever changes and the verse stops parsing, `sources.wels` reports `parse-miss` rather than showing a blank card. Sibling feeds exist if a different flavor is ever wanted: `/bible3/feed/bible3` (Through My Bible in Three Years — a reading plan), plus family/women's/teen devotion feeds, all listed at `wels.net/rss-feeds`.
+
+---
+
 ## The briefing system
 
 Two Cowork skills, cloud-hosted, scheduled:
@@ -173,6 +191,7 @@ Cowork has an editable egress allowlist. News source domains get added there. Th
 | Today's workout | Static link | See below |
 | Today (calendar) | Worker `/calendar` | Live; ICS feeds, Chicago time |
 | Treasurer tasks | Worker `/tasks` | Live; JELC Notion, due + settled |
+| Daily devotion | Worker `/devotion` | Live; WELS RSS, verse + excerpt |
 | Journal nudge | config.js | |
 | Slow burns | config.js | |
 | On this day | Wikipedia | Live |
@@ -217,7 +236,7 @@ Before filtering on any field, ask whether it carries the meaning you think it d
 - ~~Google Calendar integration~~ — **done** via `/calendar`. Apple/iCloud still pending: the `CAL_ICS_2` slot is wired and unset.
 - ~~Notion church tasks~~ — **done** via `/tasks` (Treasurer tasks card).
 - JELC Council numbers (pulled from the JELC Council dashboard, not hand-maintained)
-- Daily Bible verse
+- ~~Daily Bible verse~~ — **done** via `/devotion` (WELS Daily Devotions).
 - Personal daily brief alongside the news briefing
 - Shorter, punchier briefing summaries (Step 6 + JSON `summary` field)
 - Delete Step 9 from both briefing skills
