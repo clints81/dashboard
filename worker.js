@@ -837,12 +837,154 @@ const TASKS = (() => {
   return { handle };
 })();
 
+// ═══════════════════════════════════════════════════════════════════════
+//  /devotion route — WELS Daily Devotion (verse + short excerpt)
+// ═══════════════════════════════════════════════════════════════════════
+//
+//  One top-level name — DEVOTION — plus one router line below.
+//
+//  Source: the official WELS Daily Devotions RSS feed. No key, no secret —
+//  a public feed, fetched server-side like /sports (the browser can't read
+//  wels.net cross-origin). Each item follows a fixed template: first
+//  paragraph is the scripture (verse text, then the reference on its own
+//  line), the next paragraphs are the reflection, then a prayer, then
+//  WELS/licensing boilerplate. We surface the verse, the reference, the
+//  devotion title, and the first sentence or two of the reflection, plus a
+//  read link (the item page) and a listen link (the mp3 enclosure).
+// ═══════════════════════════════════════════════════════════════════════
+
+const DEVOTION = (() => {
+  const CACHE_SECONDS = 3 * 60 * 60; // devotions update once a day (~05:30 UTC)
+  const FEED = 'https://wels.net/dev-daily/feed/pt-dev-daily';
+
+  // Scripture reference, e.g. "Romans 8:24", "1 Corinthians 13:4-7",
+  // "Song of Songs 2:1", "John 3:16-17,19".
+  const REF_RE = /((?:[1-3]\s)?[A-Z][a-zA-Z]+(?:\s(?:of\s)?[A-Z][a-zA-Z]+)*\s\d{1,3}:\d{1,3}(?:[-–]\d{1,3})?(?:,\s?\d{1,3}(?:[-–]\d{1,3})?)*)/;
+
+  function decode(s) {
+    return s
+      .replace(/<!\[CDATA\[|\]\]>/g, '')
+      .replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(+n))
+      .replace(/&#x([0-9a-f]+);/gi, (_, n) => String.fromCodePoint(parseInt(n, 16)))
+      .replace(/&nbsp;/g, ' ')
+      .replace(/&quot;/g, '"').replace(/&apos;/g, "'")
+      .replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+      .replace(/&amp;/g, '&');
+  }
+
+  const tag = (xml, name) => {
+    const m = xml.match(new RegExp(`<${name}[^>]*>([\\s\\S]*?)</${name}>`, 'i'));
+    return m ? decode(m[1]).trim() : '';
+  };
+
+  // Cleaned, non-empty <p> texts, with <br> preserved as newlines.
+  function paragraphs(desc) {
+    let b = desc.replace(/^<!\[CDATA\[/, '').replace(/\]\]>$/, '');
+    b = b.replace(/<img\b[^>]*>/gi, '').replace(/<audio\b[\s\S]*?<\/audio>/gi, '');
+    const out = [];
+    const re = /<p\b[^>]*>([\s\S]*?)<\/p>/gi;
+    let m;
+    while ((m = re.exec(b))) {
+      const t = decode(m[1].replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]+>/g, ''))
+        .replace(/\r/g, '').replace(/[ \t]+\n/g, '\n').trim();
+      if (t) out.push(t);
+    }
+    return out;
+  }
+
+  const isBoiler = p =>
+    /^listen to devotion$/i.test(p) ||
+    /^Daily Devotions is brought to you by WELS/i.test(p) ||
+    /^This work is licensed/i.test(p) ||
+    /^All Scripture quotations/i.test(p);
+
+  function parse(xml) {
+    const item = (xml.match(/<item>[\s\S]*?<\/item>/) || [])[0];
+    if (!item) return null;
+
+    const fullTitle = tag(item, 'title');                    // "Saved In Hope – September 3, 2026"
+    const title = fullTitle.split(/\s[–—-]\s/)[0].trim() || fullTitle;
+    const readUrl = tag(item, 'link');
+    const pubDate = tag(item, 'pubDate');
+    const encl = item.match(/<enclosure\b[^>]*url="([^"]+)"/i);
+    const audioUrl = encl ? encl[1] : '';
+
+    const descM = item.match(/<description>([\s\S]*?)<\/description>/i);
+    const paras = descM ? paragraphs(descM[1]).filter(p => !isBoiler(p)) : [];
+
+    // Verse paragraph: text, then reference on its own line.
+    const versePara = paras[0] || '';
+    let verse = versePara, reference = '';
+    const lines = versePara.split('\n').map(s => s.trim()).filter(Boolean);
+    if (lines.length > 1 && REF_RE.test(lines[lines.length - 1])) {
+      reference = lines.pop();
+      verse = lines.join(' ');
+    } else {
+      const rm = versePara.match(REF_RE);
+      if (rm) { reference = rm[1]; verse = versePara.replace(rm[1], '').trim(); }
+    }
+    verse = verse.replace(/\s+/g, ' ').replace(/\s+([,.;:])/g, '$1').trim();
+
+    // Excerpt: first ~2 sentences of the reflection (the paragraph after the verse).
+    const bodyPara = (paras[1] || '').replace(/\s+/g, ' ').trim();
+    const sentences = bodyPara.match(/[^.!?]+[.!?]+/g) || (bodyPara ? [bodyPara] : []);
+    let excerpt = sentences.slice(0, 2).join(' ').replace(/\s+/g, ' ').trim();
+    if (excerpt.length > 240) excerpt = excerpt.slice(0, 240).replace(/\s+\S*$/, '') + '…';
+
+    return { title, verse, reference, excerpt, readUrl, audioUrl, pubDate };
+  }
+
+  async function handle(request) {
+    const cors = {
+      'access-control-allow-origin': '*',
+      'access-control-allow-methods': 'GET, OPTIONS',
+      'content-type': 'application/json; charset=utf-8',
+    };
+    if (request.method === 'OPTIONS') return new Response(null, { headers: cors });
+    if (request.method !== 'GET') {
+      return new Response(JSON.stringify({ error: 'GET only' }), { status: 405, headers: cors });
+    }
+
+    const cache = caches.default;
+    const cacheKey = new Request(new URL(request.url).toString(), { method: 'GET' });
+    const hit = await cache.match(cacheKey);
+    if (hit) return hit;
+
+    let data;
+    try {
+      const res = await fetch(FEED, { headers: { 'User-Agent': 'clint-dashboard/1.0' } });
+      if (!res.ok) {
+        data = { sources: { wels: `HTTP ${res.status}` }, generated: new Date().toISOString() };
+      } else {
+        const xml = await res.text();
+        const parsed = parse(xml);
+        data = parsed
+          ? { ...parsed, source: 'WELS Daily Devotions',
+              sources: { wels: parsed.verse ? 'ok' : 'parse-miss' },
+              generated: new Date().toISOString() }
+          : { sources: { wels: 'no-items' }, generated: new Date().toISOString() };
+      }
+    } catch (e) {
+      data = { sources: { wels: `error: ${e.message}` }, generated: new Date().toISOString() };
+    }
+
+    const res = new Response(JSON.stringify(data), {
+      headers: { ...cors, 'cache-control': `public, max-age=${CACHE_SECONDS}` },
+    });
+    await cache.put(cacheKey, res.clone());
+    return res;
+  }
+
+  return { handle };
+})();
+
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
     if (url.pathname === '/sports') return handleSports(request, ctx);
     if (url.pathname === '/calendar') return CALENDAR.handle(request, env);
     if (url.pathname === '/tasks') return TASKS.handle(request, env);
+    if (url.pathname === '/devotion') return DEVOTION.handle(request);
 
     const cors = {
       "Access-Control-Allow-Origin": "*",

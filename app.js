@@ -514,6 +514,43 @@ async function loadTasks() {
   }
 }
 
+// ── WELS daily devotion ────────────────────────────────────────────────
+// Worker /devotion route. Pulls the official WELS Daily Devotions RSS feed
+// (server-side — the browser can't read wels.net cross-origin) and returns
+// the verse, reference, devotion title, and a short excerpt, plus read and
+// listen links. Sourced, not random.
+
+async function loadDevotion() {
+  const el = $('devotion-content');
+  if (!el) return;
+
+  const url = CONFIG.devotion?.url || 'https://briefing.clintsievers.workers.dev/devotion';
+
+  try {
+    const res = await fetchRetry(`${url}?t=${Date.now()}`);
+    const d = await res.json();
+
+    // A non-ok feed must not read as a blank card — fail to an explicit state.
+    if (d.sources?.wels !== 'ok' || !d.verse) {
+      el.innerHTML = `<div class="error">Devotion unavailable</div>`;
+      return;
+    }
+
+    el.innerHTML = `
+      <div class="devotion-verse">${escapeHTML(d.verse)}</div>
+      ${d.reference ? `<div class="devotion-ref">${escapeHTML(d.reference)}</div>` : ''}
+      ${d.title ? `<div class="devotion-title">${escapeHTML(d.title)}</div>` : ''}
+      ${d.excerpt ? `<div class="devotion-excerpt">${escapeHTML(d.excerpt)}</div>` : ''}
+      <div class="devotion-links">
+        ${d.readUrl ? `<a href="${escapeHTML(d.readUrl)}" target="_blank" rel="noopener">Read</a>` : ''}
+        ${d.audioUrl ? `<a href="${escapeHTML(d.audioUrl)}" target="_blank" rel="noopener">Listen</a>` : ''}
+      </div>`;
+
+  } catch (e) {
+    el.innerHTML = `<div class="error">Devotion unavailable</div>`;
+  }
+}
+
 // ── Orangetheory daily workout ─────────────────────────────────────────
 // Reddit blocks programmatic reads of its JSON endpoints (search.json returns
 // "blocked by network security" even from a plain browser tab), so there's no
@@ -627,6 +664,7 @@ function loadLiveData() {
   loadSports();
   loadCalendar();
   loadTasks();
+  loadDevotion();
   loadOnThisDay();
   loadBriefing(); // handles both briefing and sit-with
 }

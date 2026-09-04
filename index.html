@@ -443,6 +443,46 @@
     @media (max-width: 700px) {
       #tasks-content { grid-template-columns: 1fr; gap: 14px; }
     }
+
+    /* ── DAILY DEVOTION ── */
+    .devotion-verse {
+      font-family: var(--serif);
+      font-style: italic;
+      font-size: 16px;
+      line-height: 1.4;
+      color: var(--ink-2);
+    }
+    .devotion-ref {
+      font-family: var(--mono);
+      font-size: 11px;
+      letter-spacing: 0.03em;
+      color: var(--accent);
+      margin-top: 6px;
+    }
+    .devotion-title {
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--ink-3);
+      margin-top: 12px;
+    }
+    .devotion-excerpt {
+      font-size: 12px;
+      line-height: 1.5;
+      color: var(--ink-4);
+      margin-top: 3px;
+    }
+    .devotion-links {
+      display: flex;
+      gap: 16px;
+      margin-top: 12px;
+    }
+    .devotion-links a {
+      font-size: 11px;
+      color: var(--accent);
+      text-decoration: none;
+      border-bottom: 1px solid transparent;
+    }
+    .devotion-links a:hover { border-bottom-color: var(--accent); }
     .now-pill {
       display: inline-block;
       font-size: 9px;
@@ -688,8 +728,15 @@
       </div>
     </div>
 
-    <!-- ── RAIL: weather, today, teams ── -->
+    <!-- ── RAIL: devotion, weather, today, teams ── -->
     <div class="rail">
+
+      <div class="card">
+        <div class="card-label">Daily devotion</div>
+        <div id="devotion-content">
+          <div class="loading">Loading devotion…</div>
+        </div>
+      </div>
 
       <div class="card">
         <div class="card-label">
