@@ -1,18 +1,19 @@
 # Morning Dashboard — Architecture Reference
 
-Last updated: September 2, 2026
+Last updated: September 3, 2026
 
 ## What this is
 A personal morning dashboard for Clint Sievers, hosted on GitHub Pages. Plain HTML/CSS/JS — no framework, no build step. It exists to replace aimless scrolling with a purposeful briefing.
 
 **Live URL:** `https://clints81.github.io/dashboard`
 **Repository:** `github.com/clints81/dashboard`
-**Worker:** `briefing.clintsievers.workers.dev` (separate — not in the repo)
+**Worker:** `briefing.clintsievers.workers.dev` (deployed separately by pasting into the Cloudflare editor — but its source now lives in the repo as `worker.js`)
 
 Repo files:
 - `index.html` — structure and design (edit rarely)
 - `config.js` — personal data layer (edit regularly, no coding required)
 - `app.js` — runtime logic and data fetching (edit for feature changes)
+- `worker.js` — the Cloudflare Worker source (edit, commit, then paste into the Cloudflare editor and deploy)
 - `DASHBOARD-REFERENCE.md` — this file
 
 ---
