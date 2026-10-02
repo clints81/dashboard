@@ -204,6 +204,7 @@ async function loadSports() {
   if (!el) return;
 
   const cap = CONFIG.sports?.maxItems ?? 6;
+  const leagueCap = CONFIG.sports?.maxLeague ?? 3;
   const url = CONFIG.sports?.url || 'https://briefing.clintsievers.workers.dev/sports';
 
   try {
@@ -213,8 +214,9 @@ async function loadSports() {
     const teams  = data.teams  || [];
     const league = data.league || [];
 
-    // Teams first. League stories only fill what's left over.
-    const items = [...teams, ...league.slice(0, Math.max(0, cap - teams.length))]
+    // Teams first. League stories only fill what's left over, headline-only
+    // so filler doesn't outweigh the teams (or outgrow the briefing column).
+    const items = [...teams, ...league.slice(0, Math.min(leagueCap, Math.max(0, cap - teams.length)))]
       .slice(0, cap);
 
     if (!items.length) {
@@ -232,7 +234,7 @@ async function loadSports() {
       <a class="sport-item" href="${it.url}" target="_blank" rel="noopener">
         <div class="sport-item-tag">${it.team || it.league}</div>
         <div class="sport-item-title">${it.title}</div>
-        ${it.desc ? `<div class="sport-item-desc">${it.desc}</div>` : ''}
+        ${it.desc && it.team ? `<div class="sport-item-desc">${it.desc}</div>` : ''}
       </a>
     `).join('') + `<div class="sport-credit">via The Athletic</div>`;
 
@@ -567,7 +569,7 @@ function renderWorkout() {
   const sub = CONFIG.workout?.subreddit || 'orangetheory';
   el.innerHTML = `
     <a class="workout-link" href="https://www.reddit.com/r/${sub}/" target="_blank" rel="noopener">
-      <div class="workout-title">Today's workout thread</div>
+      <div class="workout-title">Orangetheory workout thread →</div>
       <div class="workout-sub">r/${sub}</div>
     </a>`;
 }

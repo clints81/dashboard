@@ -526,24 +526,29 @@
     }
     .journal-window .closes { color: var(--warn); font-weight: 600; }
 
-    /* ── WORKOUT ── */
+    /* ── WORKOUT — a footer line on the Today card ── */
+    .cal-footer {
+      border-top: 1px solid var(--line);
+      margin-top: 10px;
+      padding-top: 10px;
+    }
     .workout-link {
-      display: block;
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 10px;
       text-decoration: none;
       color: inherit;
     }
     .workout-title {
-      font-size: 13px;
-      font-weight: 500;
+      font-size: 12.5px;
       color: var(--ink-2);
-      line-height: 1.4;
     }
     .workout-link:hover .workout-title { color: var(--accent); }
     .workout-sub {
       font-family: var(--mono);
       font-size: 10px;
       color: var(--ink-4);
-      margin-top: 4px;
     }
     /* ── ON THIS DAY ── */
     .otd-items { display: flex; flex-direction: column; gap: 0; }
@@ -754,6 +759,7 @@
         <div class="cal-items" id="cal-content">
           <div class="loading">Google Calendar not connected yet.</div>
         </div>
+        <div class="cal-footer" id="workout-content"></div>
       </div>
 
       <div class="card">
@@ -762,16 +768,6 @@
           <span class="card-label-badge" id="sports-teams-badge">—</span>
         </div>
         <div id="sports-content" class="loading">Loading scores…</div>
-      </div>
-
-      <div class="card">
-        <div class="card-label">Today's workout</div>
-        <div id="workout-content"></div>
-      </div>
-
-      <div class="card">
-        <div class="card-label">On this day</div>
-        <div class="otd-items" id="otd-content"></div>
       </div>
 
     </div>
@@ -806,7 +802,7 @@
     </div>
 
     <!-- ── JOURNAL ── -->
-    <div class="card col-6">
+    <div class="card col-4">
       <div class="card-label">Journal nudge</div>
       <div class="journal-streak">
         <div class="journal-streak-num" id="journal-streak">—</div>
@@ -817,12 +813,18 @@
     </div>
 
     <!-- ── SLOW BURNS ── -->
-    <div class="card col-6">
+    <div class="card col-4">
       <div class="card-label">
         Slow burns
         <span class="card-label-badge">Back burner</span>
       </div>
       <div class="burn-items" id="burn-content"></div>
+    </div>
+
+    <!-- ── ON THIS DAY ── -->
+    <div class="card col-4">
+      <div class="card-label">On this day</div>
+      <div class="otd-items" id="otd-content"></div>
     </div>
 
   </div><!-- /grid -->

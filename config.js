@@ -22,6 +22,7 @@ const CONFIG = {
   sports: {
     url: "https://briefing.clintsievers.workers.dev/sports",
     maxItems: 6,
+    maxLeague: 3,   // league filler cap — keeps the card from outgrowing the briefing
   },
 
   // ── Orangetheory daily workout ──────────────

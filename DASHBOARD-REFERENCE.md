@@ -102,7 +102,9 @@ The `/sports` JSON includes a `sources` block reporting each feed's status (`ok`
 20 minutes, keyed on path + query string. `?/sports?t=N` with a changing N forces a fresh build. Don't hammer it — rapid rebuilds have triggered Google News 503s.
 
 ### Display
-`app.js` takes `teams` first, then fills remaining slots from `league`, then caps at `CONFIG.sports.maxItems` (6). Empty state reads "Nothing on your teams today."
+`app.js` takes `teams` first, then fills remaining slots from `league` — at most `CONFIG.sports.maxLeague` (3) of them — then caps at `CONFIG.sports.maxItems` (6). League filler renders headline-only; team items keep their description. Empty state reads "Nothing on your teams today."
+
+The filler cap and headline-only treatment exist for layout as much as taste (Oct 2026): at six full items this card ran ~770px and pushed the rail ~600px past the briefing, leaving a dead column on the left.
 
 **The cap is the point.** A card that ends is different in kind from a feed. Raising it turns this back into the thing it was built to replace.
 
@@ -243,7 +245,7 @@ Before filtering on any field, ask whether it carries the meaning you think it d
 - Delete Step 9 from both briefing skills
 - Add Step 8.5 to the weekend skill — **check whether this is done**
 - Day summary sentence is still static; improves once Calendar is wired
-- Decide whether league fill earns its slots, or whether the card should be allowed to go short
+- ~~Decide whether league fill earns its slots~~ — capped at 3, headline-only (Oct 2026). Revisit if the card feels thin.
 - Cleaner Worker URL via a `clintsievers.com` subdomain (deliberately deferred)
 - ~~git for the Worker~~ — **done**, source is now `worker.js` in the repo. Consider wrangler too once it outgrows one editor screen (deploy is still a manual paste into the Cloudflare editor).
 
@@ -259,6 +261,8 @@ Warm light theme. CSS custom properties in `:root` in `index.html`.
 
 Fonts: Geist (sans), Instrument Serif (display), Geist Mono (mono), via Google Fonts.
 
-Grid: 12-column, `var(--gap)` gutters. Briefing runs 8 wide; weather/today/teams/workout/on-this-day stack in a 4-column rail; the long-read card spans full width as a divider; Journal and Slow Burns split the band beneath at 6 each.
+Grid: 12-column, `var(--gap)` gutters. Briefing runs 8 wide; devotion/weather/today/teams stack in a 4-column rail (the workout link is a footer line on the Today card); the long-read card spans full width as a divider; Journal, Slow Burns and On this day split the band beneath at 4 each.
+
+The rail should end near where the briefing does. It grows with calendar events and sports items, the briefing with story count — when adding a rail card, check both columns at 1194 wide on a full sports day, not just a quiet one.
 
 Installs as a standalone iPad app (11", landscape) via web app manifest + home screen icons. Screenshots for layout work: 1194×834 at deviceScaleFactor 2.
