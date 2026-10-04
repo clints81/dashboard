@@ -1,16 +1,22 @@
 // briefing-retrieval: pulls the morning candidate pools into KV.
 //
 //   cron  */5 6-7 * * *  → tick() (see run.js for why it's many ticks)
+//   cron  0 12 * * *     → save the Cowork briefing as cowork:<date> (7am CDT / 6am CST)
 //
 //   GET  /                 latest run summary + route list
 //   GET  /news[/YYYY-MM-DD]     news candidate pool
 //   GET  /sitwith[/YYYY-MM-DD]  something-to-sit-with pool (rolling 7 days)
 //   GET  /status[/YYYY-MM-DD]   per-source results for a run (no items)
 //   GET  /stats                 per-source ok/failed history, last 30 days
+//   GET  /compare[/YYYY-MM-DD]  Cowork's stories matched against the pool (HTML;
+//                               ?json for the dashboard card)
 //   POST /run                   run now; needs X-Run-Key. ?all=1 does every
 //                               pending source, ?force=1 restarts today's run.
 
 import { tick, chicagoDate } from './run.js';
+import { buildCompare, renderCompare, snapshotCowork } from './compare.js';
+
+const SNAPSHOT_CRON = '0 12 * * *';
 
 const CORS = { 'access-control-allow-origin': '*', 'access-control-allow-headers': 'Content-Type, X-Run-Key', 'access-control-allow-methods': 'GET, POST, OPTIONS' };
 
@@ -25,6 +31,10 @@ async function getDoc(env, prefix, date) {
 
 export default {
   async scheduled(controller, env, ctx) {
+    if (controller.cron === SNAPSHOT_CRON) {
+      ctx.waitUntil(snapshotCowork(env, chicagoDate()).then(b => console.log(b ? `cowork snapshot ${b.date}` : 'cowork briefing not yet written for today')));
+      return;
+    }
     ctx.waitUntil(tick(env, { now: new Date(controller.scheduledTime), scheduled: true }).then(r => {
       const { newsDoc, sitDoc, ...log } = r;
       console.log(JSON.stringify(log));
@@ -46,7 +56,7 @@ export default {
 
     switch (route) {
       case '':
-        return json({ latest: await env.POOL.get('latest', 'json'), routes: ['/news[/date]', '/sitwith[/date]', '/status[/date]', '/stats'] });
+        return json({ latest: await env.POOL.get('latest', 'json'), routes: ['/compare[/date]', '/news[/date]', '/sitwith[/date]', '/status[/date]', '/stats'] });
       case 'news':
       case 'sitwith':
         return getDoc(env, route, date);
@@ -55,6 +65,14 @@ export default {
         if (!run) return json({ error: 'no run for that date' }, 404);
         for (const u of Object.values(run.units)) delete u.items;
         return json(run);
+      }
+      case 'compare': {
+        const c = await buildCompare(env, date || chicagoDate());
+        if (url.searchParams.has('json')) {
+          const { all, ...rest } = c;
+          return json(rest);
+        }
+        return new Response(renderCompare(c), { headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' } });
       }
       case 'stats':
         return json((await env.POOL.get('stats', 'json')) || {});

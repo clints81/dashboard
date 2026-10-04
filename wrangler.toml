@@ -7,12 +7,19 @@ workers_dev = true
 # 06:00 UTC is always after midnight Central, so the run gets the right date.
 # A full run takes ~8 ticks; the rest are retries and slack.
 [triggers]
-crons = ["*/5 6-7 * * *"]
+# Plus 12:00 UTC (7am CDT / 6am CST): save the Cowork briefing for /compare.
+crons = ["*/5 6-7 * * *", "0 12 * * *"]
 
 # Separate from the dashboard Worker's `briefing-store` namespace on purpose.
 [[kv_namespaces]]
 binding = "POOL"
 id = "9ffa5f16b12f4f21a4dd2ed85a2d19ed"
+
+# Read-only link to the dashboard Worker, used by /compare to read Cowork's
+# briefing (GET /). Needed because same-account workers.dev fetches fail.
+[[services]]
+binding = "COWORK"
+service = "briefing"
 
 [observability]
 enabled = true

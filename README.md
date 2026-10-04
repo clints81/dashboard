@@ -44,12 +44,23 @@ sit-with items measured.
 
 ```
 GET  /                     latest summary (counts + failing sources)
+GET  /compare[/YYYY-MM-DD] Cowork stories vs the pool (HTML; ?json for the card)
 GET  /news[/YYYY-MM-DD]
 GET  /sitwith[/YYYY-MM-DD]
 GET  /status[/YYYY-MM-DD]  per-source results, no items
 GET  /stats
 POST /run                  X-Run-Key required; ?all=1 every pending source, ?force=1 restart today
 ```
+
+## Comparison with the Cowork briefing
+
+`/compare` matches each story in Cowork's briefing (read from the dashboard
+Worker through a read-only service binding) against that day's pool by
+headline words, showing the top 3 pool matches, a verdict (same link /
+likely / check / not found), and whether Cowork's outlet is a pool source.
+A search box covers every pool item. A 12:00 UTC cron saves each morning's
+briefing as `cowork:<date>` so earlier days stay comparable;
+`/compare?json` feeds the dashboard card.
 
 ## How a run works
 
