@@ -1,0 +1,14 @@
+{
+  "name": "morning-briefing-retrieval",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev --test-scheduled",
+    "deploy": "wrangler deploy",
+    "dry-run": "node scripts/dry-run.mjs",
+    "tail": "wrangler tail"
+  },
+  "devDependencies": {
+    "wrangler": "^4.147.0"
+  }
+}

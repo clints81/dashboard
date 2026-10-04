@@ -1,0 +1,20 @@
+name = "briefing-retrieval"
+main = "src/index.js"
+compatibility_date = "2026-10-01"
+workers_dev = true
+
+# Every 5 minutes, 10:00–11:55 UTC (5:00–6:55am CDT; 4:00–5:55am CST).
+# A full run takes ~8 ticks; the rest are retries and slack.
+[triggers]
+crons = ["*/5 10-11 * * *"]
+
+# Separate from the dashboard Worker's `briefing-store` namespace on purpose.
+[[kv_namespaces]]
+binding = "POOL"
+id = "9ffa5f16b12f4f21a4dd2ed85a2d19ed"
+
+[observability]
+enabled = true
+
+# Secrets (set with `npx wrangler secret put <NAME>`, never committed):
+#   NYT_API_KEY, GUARDIAN_API_KEY, RUN_KEY
