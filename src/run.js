@@ -71,11 +71,13 @@ async function runUnit(src, env, ctx, prev) {
   const attempts = (prev?.attempts || 0) + 1;
   try {
     const { items: raw, meta } = await FETCHERS[src.kind](src, env, ctx);
-    const counts = { fetched: raw.length, valid: 0, undated: 0, bad_date: 0, no_url_or_title: 0 };
+    const counts = { fetched: raw.length, valid: 0, undated: 0, bad_date: 0, no_url_or_title: 0, excluded: 0 };
     const items = [];
     for (const r of raw) {
       const { item, reason } = normalize(r, src, started);
-      if (item) { items.push(item); counts.valid++; } else counts[reason]++;
+      if (!item) counts[reason]++;
+      else if (isExcluded(src, item)) counts.excluded++;
+      else { items.push(item); counts.valid++; }
     }
     return { status: items.length ? 'ok' : 'empty', attempts, ms: Date.now() - started, ...meta, ...counts, items, at: new Date().toISOString() };
   } catch (e) {
@@ -83,6 +85,13 @@ async function runUnit(src, env, ctx, prev) {
     const permanent = /^missing /.test(e.message) || e.http === 401;
     return { status: 'error', attempts, ms: Date.now() - started, error: e.message, http: e.http, ...(permanent && { permanent }), items: [], at: new Date().toISOString() };
   }
+}
+
+const SOURCE_BY_ID = Object.fromEntries(SOURCES.map(s => [s.id, s]));
+
+function isExcluded(src, item) {
+  const x = src.exclude;
+  return !!x && ((x.url && x.url.test(item.url)) || (x.title && x.title.test(item.title)));
 }
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -154,13 +163,16 @@ function assemble(run, pool, nowMs, carried) {
   let candidates = [];
   for (const s of SOURCES.filter(s => s.pool === pool)) {
     const u = run.units[s.id];
-    let inWindow = (u?.items || []).filter(i => Date.parse(i.published_at) >= cutoff);
-    if (pool === 'sitwith') inWindow = inWindow.sort((a, b) => b.published_at.localeCompare(a.published_at)).slice(0, SITWITH_PER_SOURCE_CAP);
+    const inWindow = (u?.items || []).filter(i => Date.parse(i.published_at) >= cutoff);
     sources[s.id] = { ...unitSummary(u), in_window: inWindow.length, kept: 0 };
     candidates.push(...inWindow);
   }
   // Carried items (yesterday's sit-with pool) lose ties to fresh ones.
-  candidates.push(...carried.filter(i => Date.parse(i.published_at) >= cutoff).map(i => ({ ...i, carried: true })));
+  // Current rules are re-applied, so a retired source or a new exclusion
+  // takes effect on carried items immediately.
+  candidates.push(...carried
+    .filter(i => Date.parse(i.published_at) >= cutoff && SOURCE_BY_ID[i.source] && !isExcluded(SOURCE_BY_ID[i.source], i))
+    .map(i => ({ ...i, carried: true })));
   candidates.sort((a, b) => a.priority - b.priority || (a.carried ? 1 : 0) - (b.carried ? 1 : 0));
 
   const byUrl = new Map();
@@ -173,7 +185,13 @@ function assemble(run, pool, nowMs, carried) {
     const { carried: wasCarried, ...item } = c;
     byUrl.set(c.url, { ...item, also_in: (item.also_in || []).filter(x => x !== item.source) });
   }
-  const items = [...byUrl.values()].sort((a, b) => b.published_at.localeCompare(a.published_at));
+  let items = [...byUrl.values()].sort((a, b) => b.published_at.localeCompare(a.published_at));
+  // Cap each source across the whole pool, after carried items are merged in,
+  // so the rolling pool can't accumulate a week of one feed.
+  if (pool === 'sitwith') {
+    const held = {};
+    items = items.filter(i => (held[i.source] = (held[i.source] || 0) + 1) <= (SOURCE_BY_ID[i.source]?.cap ?? SITWITH_PER_SOURCE_CAP));
+  }
   for (const i of items) if (sources[i.source]) sources[i.source].kept++;
   return { items, sources };
 }
