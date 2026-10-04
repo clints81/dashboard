@@ -13,7 +13,7 @@ source in `clints81/dashboard/worker.js`) and uses its own KV namespace
 
 | Key | What |
 |---|---|
-| `news:YYYY-MM-DD` | Items published in the last 36h from NYT (Top Stories + Newswire APIs, HomePage RSS backstop), Guardian API, NPR, BBC, Politico, Ars Technica |
+| `news:YYYY-MM-DD` | Items published in the last 36h from NYT (Top Stories API: home, world, us, politics, business, technology, science; HomePage RSS backstop), Guardian API, NPR, BBC, Politico, Ars Technica |
 | `sitwith:YYYY-MM-DD` | Rolling 7 days (RSS) from NYT Magazine/Sunday Review, The Athletic, The Atlantic, Arts & Letters Daily, Wired, The Dispatch, The New Yorker, Foreign Affairs, Guardian Long Read, Comment, Christianity Today |
 | `stats` | Per-source status for each of the last 30 days, with ok/failed counts and consecutive failures |
 | `run:YYYY-MM-DD` | The run in progress or finished: per-source status, counts, errors |
@@ -54,7 +54,8 @@ fetched for its own `datePublished`. Resolved dates are cached in
 ## Sources dropped after testing (2026-10-04)
 
 The Ringer (no RSS; every feed URL 404s), Politico picks feed (403), Atlantic
-magazine channel (404), New Yorker longreads tag (404).
+magazine channel (404), New Yorker longreads tag (404), NYT Times Newswire
+API (no longer offered to new apps).
 
 ## Setup
 
@@ -67,5 +68,5 @@ npx wrangler secret put GUARDIAN_API_KEY
 npm run deploy
 ```
 
-Keys: NYT from developer.nytimes.com (enable Top Stories and Times Newswire),
+Keys: NYT from developer.nytimes.com (enable Top Stories),
 Guardian from open-platform.theguardian.com.

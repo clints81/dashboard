@@ -9,7 +9,8 @@
 //
 // Verified 2026-10-04 from both a Mac and a Cloudflare Worker. Dropped after
 // testing: The Ringer (no RSS, every feed URL 404s), Politico picks (403),
-// Atlantic magazine channel (404), New Yorker longreads tag (404).
+// Atlantic magazine channel (404), New Yorker longreads tag (404), NYT Times
+// Newswire API (no longer offered on developer.nytimes.com).
 
 const NYT_RSS = 'https://rss.nytimes.com/services/xml/rss/nyt/';
 
@@ -19,7 +20,9 @@ export const SOURCES = [
   { id: 'nyt-top-world',    pool: 'news', kind: 'nyt-top', section: 'world',    publisher: 'The New York Times', priority: 0, rate: 'nyt' },
   { id: 'nyt-top-us',       pool: 'news', kind: 'nyt-top', section: 'us',       publisher: 'The New York Times', priority: 0, rate: 'nyt' },
   { id: 'nyt-top-politics', pool: 'news', kind: 'nyt-top', section: 'politics', publisher: 'The New York Times', priority: 0, rate: 'nyt' },
-  { id: 'nyt-newswire',     pool: 'news', kind: 'nyt-newswire',                 publisher: 'The New York Times', priority: 0, rate: 'nyt' },
+  { id: 'nyt-top-business', pool: 'news', kind: 'nyt-top', section: 'business', publisher: 'The New York Times', priority: 0, rate: 'nyt' },
+  { id: 'nyt-top-technology', pool: 'news', kind: 'nyt-top', section: 'technology', publisher: 'The New York Times', priority: 0, rate: 'nyt' },
+  { id: 'nyt-top-science',  pool: 'news', kind: 'nyt-top', section: 'science',  publisher: 'The New York Times', priority: 0, rate: 'nyt' },
   // Keyless backstop: if the API key is missing or rate-limited, NYT links still land.
   { id: 'nyt-rss-home',     pool: 'news', kind: 'rss', url: NYT_RSS + 'HomePage.xml', publisher: 'The New York Times', priority: 1 },
   { id: 'guardian-news',    pool: 'news', kind: 'guardian', query: { section: 'world|us-news|politics|business|technology|science' }, publisher: 'The Guardian', priority: 2 },

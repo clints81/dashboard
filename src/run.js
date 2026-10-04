@@ -201,6 +201,7 @@ async function finalize(run, env, now) {
   // instead of double counting. ok/failed counts are derived from it.
   const stats = (kv && (await kv.get('stats', 'json'))) || {};
   const cutoffDate = shiftDate(date, -HISTORY_DAYS);
+  for (const id of Object.keys(stats)) if (!SOURCES.some(s => s.id === id)) delete stats[id];
   for (const s of SOURCES) {
     const u = run.units[s.id];
     const st = (stats[s.id] ||= { history: {} });

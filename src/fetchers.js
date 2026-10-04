@@ -39,19 +39,6 @@ async function nytTop(src, env) {
   return { items, meta: { via: 'api' } };
 }
 
-async function nytNewswire(src, env) {
-  if (!env.NYT_API_KEY) throw new Error('missing NYT_API_KEY');
-  const j = JSON.parse(await get(`https://api.nytimes.com/svc/news/v3/content/nyt/all.json?limit=100&api-key=${env.NYT_API_KEY}`, 'application/json'));
-  const items = (j.results || [])
-    .filter(r => r.url && r.title && r.item_type === 'Article')
-    .map(r => ({
-      title: r.title, url: r.url, rawDate: r.first_published_date || r.published_date, summary: r.abstract || '',
-      author: (r.byline || '').replace(/^By\s+/i, ''), section: [r.section, r.subsection].filter(Boolean).join(' / '),
-      word_count: null,
-    }));
-  return { items, meta: { via: 'api' } };
-}
-
 async function guardian(src, env, ctx) {
   if (!env.GUARDIAN_API_KEY) throw new Error('missing GUARDIAN_API_KEY');
   const params = new URLSearchParams({
@@ -126,4 +113,4 @@ async function aldaily(src, env, ctx) {
   return { items, meta: { via: 'rss + page fetch', page_fetches: fetched, unresolved_dates: unresolved } };
 }
 
-export const FETCHERS = { rss: src => rss(src), 'nyt-top': nytTop, 'nyt-newswire': nytNewswire, guardian, aldaily };
+export const FETCHERS = { rss: src => rss(src), 'nyt-top': nytTop, guardian, aldaily };
