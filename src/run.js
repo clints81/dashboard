@@ -105,7 +105,7 @@ function pickBatch(run, all) {
 
 // opts.all: run every pending source now (manual runs and local dry runs);
 // NYT calls are still spaced 13s apart to respect 5 calls/min.
-export async function tick(env, { now = new Date(), force = false, all = false } = {}) {
+export async function tick(env, { now = new Date(), force = false, all = false, scheduled = false } = {}) {
   const kv = env.POOL;
   const date = chicagoDate(now);
   const key = `run:${date}`;
@@ -127,7 +127,9 @@ export async function tick(env, { now = new Date(), force = false, all = false }
   await Promise.all([doNyt, ...others.map(async s => { run.units[s.id] = await runUnit(s, env, ctx, run.units[s.id]); })]);
 
   const remaining = pickBatch(run, true).length;
-  const lastTick = now.getUTCHours() > LAST_TICK_UTC.h || (now.getUTCHours() === LAST_TICK_UTC.h && now.getUTCMinutes() >= LAST_TICK_UTC.m);
+  // Only the scheduled deadline tick forces a finish; manual runs outside the
+  // window keep going until every source is done or out of attempts.
+  const lastTick = scheduled && now.getUTCHours() === LAST_TICK_UTC.h && now.getUTCMinutes() >= LAST_TICK_UTC.m;
   let result = { date, ran: batch.map(s => `${s.id}:${run.units[s.id].status}`), remaining };
   if (remaining === 0 || lastTick) result = { ...result, ...(await finalize(run, env, now)) };
   if (kv) await kv.put(key, JSON.stringify(run), { expirationTtl: KV_TTL });

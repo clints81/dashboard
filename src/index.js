@@ -25,7 +25,7 @@ async function getDoc(env, prefix, date) {
 
 export default {
   async scheduled(controller, env, ctx) {
-    ctx.waitUntil(tick(env, { now: new Date(controller.scheduledTime) }).then(r => {
+    ctx.waitUntil(tick(env, { now: new Date(controller.scheduledTime), scheduled: true }).then(r => {
       const { newsDoc, sitDoc, ...log } = r;
       console.log(JSON.stringify(log));
     }));
