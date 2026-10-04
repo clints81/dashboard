@@ -6,7 +6,7 @@ import { parseFeed, stripHtml, decodeEntities } from './feed.js';
 
 const UA = 'Mozilla/5.0 (compatible; morning-briefing/1.0; +https://github.com/clints81/morning-briefing-retrieval)';
 
-async function get(url, accept) {
+export async function get(url, accept) {
   const r = await fetch(url, { headers: { 'user-agent': UA, accept }, redirect: 'follow' });
   if (!r.ok) {
     // Include the server's own explanation (e.g. NYT's faultstring), which

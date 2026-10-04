@@ -6,6 +6,10 @@
 
 import { SOURCES, NEWS_WINDOW_HOURS, SITWITH_WINDOW_DAYS, SITWITH_PER_SOURCE_CAP } from './sources.js';
 import { FETCHERS } from './fetchers.js';
+import { canonicalUrl } from './feed.js';
+import { measure, needsLength } from './lengths.js';
+
+export { canonicalUrl };
 
 const MAX_ATTEMPTS = 3;
 const UNITS_PER_TICK = 4;
@@ -23,20 +27,6 @@ export function shiftDate(date, days) {
   const d = new Date(date + 'T12:00:00Z');
   d.setUTCDate(d.getUTCDate() + days);
   return d.toISOString().slice(0, 10);
-}
-
-const TRACKING = /^(utm_|smid$|smtyp$|ref$|referrer$|partner$|cmp$|src$|fbclid$|gclid$|mc_|_hs|at_|itm_|intcmp$)/i;
-
-export function canonicalUrl(u) {
-  try {
-    const x = new URL(u);
-    x.hash = '';
-    for (const k of [...x.searchParams.keys()]) if (TRACKING.test(k)) x.searchParams.delete(k);
-    x.protocol = 'https:';
-    return x.toString().replace(/\/$/, '');
-  } catch {
-    return null;
-  }
 }
 
 // Validate one raw item. Every kept item has a real, parseable publication
@@ -60,6 +50,7 @@ function normalize(raw, src, fetchedAt) {
     section: raw.section || '',
     word_count: raw.word_count ?? null,
     read_minutes: raw.word_count ? Math.round(raw.word_count / 238) : null,
+    length_source: raw.word_count ? (src.kind === 'guardian' ? 'guardian-api' : 'feed') : null,
     fetched_at: new Date(fetchedAt).toISOString(),
   };
   if (raw.via_publisher) item.via_publisher = raw.via_publisher;
@@ -138,16 +129,48 @@ export async function tick(env, { now = new Date(), force = false, all = false, 
   await Promise.all([doNyt, ...others.map(async s => { run.units[s.id] = await runUnit(s, env, ctx, run.units[s.id]); })]);
 
   const remaining = pickBatch(run, true).length;
+  // Once every source is in, spare ticks measure sit-with read lengths. Never
+  // in the same invocation as source fetches: together they'd pass the free
+  // plan's 50-fetch limit.
+  let lengthsLeft = null, lengthSummary;
+  if (remaining === 0 && batch.length === 0) ({ left: lengthsLeft, summary: lengthSummary } = await lengthStep(run, env, now, all));
   // Only the scheduled deadline tick forces a finish; manual runs outside the
   // window keep going until every source is done or out of attempts.
   const lastTick = scheduled && now.getUTCHours() === LAST_TICK_UTC.h && now.getUTCMinutes() >= LAST_TICK_UTC.m;
   // Per-source detail is returned directly as well as saved, because KV reads
   // can lag a write by up to a minute.
   const units = Object.fromEntries(batch.map(s => [s.id, unitSummary(run.units[s.id])]));
-  let result = { date, ran: batch.map(s => `${s.id}:${run.units[s.id].status}`), remaining, units };
-  if (remaining === 0 || lastTick) result = { ...result, ...(await finalize(run, env, now)) };
+  let result = { date, ran: batch.map(s => `${s.id}:${run.units[s.id].status}`), remaining, units, ...(lengthSummary && { lengths: lengthSummary, lengths_left: lengthsLeft }) };
+  if ((remaining === 0 && lengthsLeft === 0) || lastTick) result = { ...result, ...(await finalize(run, env, now)) };
   if (kv) await kv.put(key, JSON.stringify(run), { expirationTtl: KV_TTL });
   return result;
+}
+
+async function loadCarried(kv, date) {
+  if (!kv) return [];
+  for (let d = 1; d <= SITWITH_WINDOW_DAYS; d++) {
+    const prev = await kv.get(`sitwith:${shiftDate(date, -d)}`, 'json');
+    if (prev?.items) return prev.items;
+  }
+  return [];
+}
+
+async function lengthStep(run, env, now, all) {
+  const kv = env.POOL;
+  const nowMs = now.getTime();
+  const lengths = (kv && (await kv.get('lengths', 'json'))) || {};
+  const { items } = assemble(run, 'sitwith', nowMs, await loadCarried(kv, run.date), lengths);
+  const jobs = items
+    .map(item => ({ item, method: SOURCE_BY_ID[item.source]?.length }))
+    .filter(j => needsLength(j.item, j.method, lengths[j.item.url], nowMs));
+  if (!jobs.length) return { left: 0 };
+  // Redirects count toward the 50-fetch limit, so page budgets leave room.
+  const summary = await measure(jobs, lengths, env, { pageBudget: all ? 20 : 5, nytCalls: 4, sleep });
+  if (kv) await kv.put('lengths', JSON.stringify(lengths));
+  const t = (run.lengths ||= { pages: 0, nyt_calls: 0, measured: 0, missed: 0, errors: {} });
+  for (const k of ['pages', 'nyt_calls', 'measured', 'missed']) t[k] += summary[k];
+  Object.assign(t.errors, summary.errors);
+  return { left: jobs.filter(j => needsLength(j.item, j.method, lengths[j.item.url], nowMs)).length, summary };
 }
 
 function unitSummary(u) {
@@ -156,7 +179,7 @@ function unitSummary(u) {
   return rest;
 }
 
-function assemble(run, pool, nowMs, carried) {
+function assemble(run, pool, nowMs, carried, lengths = {}) {
   const windowMs = pool === 'news' ? NEWS_WINDOW_HOURS * 36e5 : SITWITH_WINDOW_DAYS * 864e5;
   const cutoff = nowMs - windowMs;
   const sources = {};
@@ -164,7 +187,7 @@ function assemble(run, pool, nowMs, carried) {
   for (const s of SOURCES.filter(s => s.pool === pool)) {
     const u = run.units[s.id];
     const inWindow = (u?.items || []).filter(i => Date.parse(i.published_at) >= cutoff);
-    sources[s.id] = { ...unitSummary(u), in_window: inWindow.length, kept: 0 };
+    sources[s.id] = { ...unitSummary(u), in_window: inWindow.length, kept: 0, ...(pool === 'sitwith' && { with_length: 0 }) };
     candidates.push(...inWindow);
   }
   // Carried items (yesterday's sit-with pool) lose ties to fresh ones.
@@ -192,7 +215,17 @@ function assemble(run, pool, nowMs, carried) {
     const held = {};
     items = items.filter(i => (held[i.source] = (held[i.source] || 0) + 1) <= (SOURCE_BY_ID[i.source]?.cap ?? SITWITH_PER_SOURCE_CAP));
   }
-  for (const i of items) if (sources[i.source]) sources[i.source].kept++;
+  for (const i of items) {
+    const m = lengths[i.url];
+    if (i.word_count == null && m?.words != null) {
+      i.word_count = m.words;
+      i.read_minutes = Math.round(m.words / 238);
+      i.length_source = m.via;
+    }
+    if (!sources[i.source]) continue;
+    sources[i.source].kept++;
+    if (pool === 'sitwith' && i.word_count != null) sources[i.source].with_length++;
+  }
   return { items, sources };
 }
 
@@ -201,19 +234,13 @@ async function finalize(run, env, now) {
   const nowMs = now.getTime();
   const date = run.date;
 
-  let carried = [];
-  if (kv) {
-    for (let d = 1; d <= SITWITH_WINDOW_DAYS && !carried.length; d++) {
-      const prev = await kv.get(`sitwith:${shiftDate(date, -d)}`, 'json');
-      if (prev?.items) carried = prev.items;
-    }
-  }
-
+  const lengths = (kv && (await kv.get('lengths', 'json'))) || {};
   const news = assemble(run, 'news', nowMs, []);
-  const sitwith = assemble(run, 'sitwith', nowMs, carried);
+  const sitwith = assemble(run, 'sitwith', nowMs, await loadCarried(kv, date), lengths);
   const generated_at = now.toISOString();
   const newsDoc = { date, generated_at, window_hours: NEWS_WINDOW_HOURS, count: news.items.length, items: news.items, sources: news.sources };
-  const sitDoc = { date, generated_at, window_days: SITWITH_WINDOW_DAYS, count: sitwith.items.length, items: sitwith.items, sources: sitwith.sources };
+  const withLength = sitwith.items.filter(i => i.word_count != null).length;
+  const sitDoc = { date, generated_at, window_days: SITWITH_WINDOW_DAYS, count: sitwith.items.length, with_length: withLength, lengths: run.lengths || null, items: sitwith.items, sources: sitwith.sources };
 
   // Per-source history, keyed by date so a re-run on the same day overwrites
   // instead of double counting. ok/failed counts are derived from it.
@@ -241,8 +268,8 @@ async function finalize(run, env, now) {
       kv.put(`news:${date}`, JSON.stringify(newsDoc), { expirationTtl: KV_TTL }),
       kv.put(`sitwith:${date}`, JSON.stringify(sitDoc), { expirationTtl: KV_TTL }),
       kv.put('stats', JSON.stringify(stats)),
-      kv.put('latest', JSON.stringify({ date, generated_at, news: newsDoc.count, sitwith: sitDoc.count, failing })),
+      kv.put('latest', JSON.stringify({ date, generated_at, news: newsDoc.count, sitwith: sitDoc.count, sitwith_with_length: withLength, failing })),
     ]);
   }
-  return { finalized: true, news: newsDoc.count, sitwith: sitDoc.count, failing, newsDoc, sitDoc };
+  return { finalized: true, news: newsDoc.count, sitwith: sitDoc.count, sitwith_with_length: withLength, failing, newsDoc, sitDoc };
 }

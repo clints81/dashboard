@@ -23,10 +23,11 @@ let r = await tick(env, { all: true, force: true });
 while (!r.finalized) r = await tick(env, { all: true });
 const rows = Object.entries({ ...r.newsDoc.sources, ...r.sitDoc.sources }).map(([id, s]) => ({
   source: id, status: s.status, fetched: s.fetched ?? '', valid: s.valid ?? '', undated: s.undated ?? '',
-  in_window: s.in_window, kept: s.kept, via: s.via ?? '', error: s.error ?? '',
+  in_window: s.in_window, kept: s.kept, with_length: s.with_length ?? '', via: s.via ?? '', error: (s.error ?? '').slice(0, 40),
 }));
 console.table(rows);
-console.log(`news: ${r.news} items · sitwith: ${r.sitwith} items · not ok: ${r.failing.join(', ') || 'none'}`);
+console.log(`news: ${r.news} items · sitwith: ${r.sitwith} items (${r.sitwith_with_length} with length) · not ok: ${r.failing.join(', ') || 'none'}`);
+console.log('lengths:', JSON.stringify(r.sitDoc.lengths));
 if (process.argv.includes('--json')) {
   mkdirSync('scratch', { recursive: true });
   writeFileSync('scratch/dry-run.json', JSON.stringify({ news: r.newsDoc, sitwith: r.sitDoc }, null, 1));

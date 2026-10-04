@@ -7,6 +7,9 @@
 //             because NYT is the preferred link target.
 //   rate      'nyt' units are spread one per tick (NYT allows 5 calls/min)
 //
+//   length    how sit-with read length is measured when the feed lacks it
+//             (see lengths.js)
+//
 // Verified 2026-10-04 from both a Mac and a Cloudflare Worker. Dropped after
 // testing: The Ringer (no RSS, every feed URL 404s), Politico picks (403),
 // Atlantic magazine channel (404), New Yorker longreads tag (404), NYT Times
@@ -35,25 +38,26 @@ export const SOURCES = [
   { id: 'ars-technica',     pool: 'news', kind: 'rss', url: 'https://feeds.arstechnica.com/arstechnica/index', publisher: 'Ars Technica', priority: 3 },
 
   // ── Something-to-sit-with pool ─────────────────────────────────────────
-  { id: 'nyt-magazine',      pool: 'sitwith', kind: 'rss', url: NYT_RSS + 'Magazine.xml', publisher: 'The New York Times', priority: 0 },
-  { id: 'nyt-sunday-review', pool: 'sitwith', kind: 'rss', url: NYT_RSS + 'sunday-review.xml', publisher: 'The New York Times', priority: 0 },
+  { id: 'nyt-magazine',      pool: 'sitwith', kind: 'rss', url: NYT_RSS + 'Magazine.xml', publisher: 'The New York Times', length: 'nyt-search', priority: 0 },
+  { id: 'nyt-sunday-review', pool: 'sitwith', kind: 'rss', url: NYT_RSS + 'sunday-review.xml', publisher: 'The New York Times', length: 'nyt-search', priority: 0 },
   // The news feed is ~100 items a day, mostly game coverage. Slugs name what a
   // story is, so exclusions match the URL: live blogs, interactives, how-to-
   // watch, fantasy, picks/odds, injury and inactives notes, score recaps.
-  { id: 'athletic', pool: 'sitwith', kind: 'rss', url: 'https://www.nytimes.com/athletic/rss/news/', publisher: 'The Athletic', priority: 1, cap: 8,
+  // No read length: pages 403 and Article Search doesn't index The Athletic.
+  { id: 'athletic', pool: 'sitwith', kind: 'rss', url: 'https://www.nytimes.com/athletic/rss/news/', publisher: 'The Athletic', length: 'none', priority: 1, cap: 8,
     exclude: { url: /\/(live-blogs|interactive)\/|stream-how-to-watch|fantasy|-picks-|-odds-|predictions|injury|inactives|score-result|result-score|-score-|-takeaways/i, title: /^how to watch|live (scores|updates)|fantasy/i } },
-  { id: 'atlantic',          pool: 'sitwith', kind: 'rss', url: 'https://www.theatlantic.com/feed/all/', publisher: 'The Atlantic', priority: 2 },
-  { id: 'aldaily',           pool: 'sitwith', kind: 'aldaily', url: 'https://www.aldaily.com/feed/', publisher: 'Arts & Letters Daily', priority: 2, heavy: true },
-  { id: 'wired-longreads',   pool: 'sitwith', kind: 'rss', url: 'https://www.wired.com/feed/tag/longreads/latest/rss', publisher: 'Wired', priority: 2 },
-  { id: 'wired-features',    pool: 'sitwith', kind: 'rss', url: 'https://www.wired.com/feed/category/backchannel/latest/rss', publisher: 'Wired', priority: 2 },
-  { id: 'dispatch',          pool: 'sitwith', kind: 'rss', url: 'https://thedispatch.com/feed/', publisher: 'The Dispatch', priority: 2 },
-  { id: 'new-yorker',        pool: 'sitwith', kind: 'rss', url: 'https://www.newyorker.com/feed/magazine/rss', publisher: 'The New Yorker', priority: 2 },
-  { id: 'foreign-affairs',   pool: 'sitwith', kind: 'rss', url: 'https://www.foreignaffairs.com/rss.xml', publisher: 'Foreign Affairs', priority: 2 },
+  { id: 'atlantic',          pool: 'sitwith', kind: 'rss', url: 'https://www.theatlantic.com/feed/all/', publisher: 'The Atlantic', length: 'none', priority: 2 },
+  { id: 'aldaily',           pool: 'sitwith', kind: 'aldaily', url: 'https://www.aldaily.com/feed/', publisher: 'Arts & Letters Daily', length: 'page', priority: 2, heavy: true },
+  { id: 'wired-longreads',   pool: 'sitwith', kind: 'rss', url: 'https://www.wired.com/feed/tag/longreads/latest/rss', publisher: 'Wired', length: 'page-text', priority: 2 },
+  { id: 'wired-features',    pool: 'sitwith', kind: 'rss', url: 'https://www.wired.com/feed/category/backchannel/latest/rss', publisher: 'Wired', length: 'page-text', priority: 2 },
+  { id: 'dispatch',          pool: 'sitwith', kind: 'rss', url: 'https://thedispatch.com/feed/', publisher: 'The Dispatch', length: 'page', priority: 2 },
+  { id: 'new-yorker',        pool: 'sitwith', kind: 'rss', url: 'https://www.newyorker.com/feed/magazine/rss', publisher: 'The New Yorker', length: 'page', priority: 2 },
+  { id: 'foreign-affairs',   pool: 'sitwith', kind: 'rss', url: 'https://www.foreignaffairs.com/rss.xml', publisher: 'Foreign Affairs', length: 'page-text', priority: 2 },
   // RSS, not the API: on 2026-10-04 the API's tag query returned 1 Long Read
   // for the week while the RSS feed had all ~5, each with a real pubDate.
-  { id: 'guardian-longread', pool: 'sitwith', kind: 'rss', url: 'https://www.theguardian.com/news/series/the-long-read/rss', publisher: 'The Guardian', priority: 2 },
-  { id: 'comment',           pool: 'sitwith', kind: 'rss', url: 'https://comment.org/feed/', publisher: 'Comment', priority: 2 },
-  { id: 'christianity-today', pool: 'sitwith', kind: 'rss', url: 'https://www.christianitytoday.com/feed/', publisher: 'Christianity Today', priority: 2 },
+  { id: 'guardian-longread', pool: 'sitwith', kind: 'rss', url: 'https://www.theguardian.com/news/series/the-long-read/rss', publisher: 'The Guardian', length: 'page', priority: 2 },
+  { id: 'comment',           pool: 'sitwith', kind: 'rss', url: 'https://comment.org/feed/', publisher: 'Comment', length: 'page-text', priority: 2 },
+  { id: 'christianity-today', pool: 'sitwith', kind: 'rss', url: 'https://www.christianitytoday.com/feed/', publisher: 'Christianity Today', length: 'page', priority: 2 },
 ];
 
 export const NEWS_WINDOW_HOURS = 36;

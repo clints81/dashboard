@@ -57,3 +57,17 @@ export function parseFeed(xml) {
     };
   });
 }
+
+const TRACKING = /^(utm_|smid$|smtyp$|ref$|referrer$|partner$|cmp$|src$|fbclid$|gclid$|mc_|_hs|at_|itm_|intcmp$)/i;
+
+export function canonicalUrl(u) {
+  try {
+    const x = new URL(u);
+    x.hash = '';
+    for (const k of [...x.searchParams.keys()]) if (TRACKING.test(k)) x.searchParams.delete(k);
+    x.protocol = 'https:';
+    return x.toString().replace(/\/$/, '');
+  } catch {
+    return null;
+  }
+}

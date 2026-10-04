@@ -23,9 +23,22 @@ no parseable date are counted as `undated` in the source's status and dropped.
 When two sources carry the same URL, NYT wins and the others are listed in
 `also_in`.
 
-`word_count` / `read_minutes` are filled only when the source gives full text
-or a word count (Guardian API, The Atlantic, Ars, NPR, Politico). Most
-long-form sources are paywalled teasers, so they are `null`, not guessed.
+`word_count` / `read_minutes` come from the feed when it carries full text
+(The Atlantic, Ars, NPR, Politico) or the Guardian API. For other sit-with
+items, spare cron ticks measure length per the source's `length` method
+(`length_source` on each item says which):
+
+| Method | Sources |
+|---|---|
+| Page metadata `wordCount`, else counted text | The Dispatch, Christianity Today, The New Yorker, Guardian Long Read, Arts & Letters Daily links |
+| Counted article text | Foreign Affairs, Comment, Wired (its metadata says 1100 on every page) |
+| NYT Article Search, looked up by headline | NYT Magazine, Sunday Review (nytimes.com pages 403; the API can't filter by URL) |
+| None | The Athletic (pages 403, not in Article Search) |
+
+Measured lengths are cached in `lengths` for 10 days, so each article is
+fetched once. Misses retry on a later day (3 tries). Nothing is guessed: an
+unmeasured item stays `null`. First full run (2026-10-04): 101 of 117
+sit-with items measured.
 
 ## Endpoints
 
