@@ -42,7 +42,9 @@ export const SOURCES = [
   { id: 'dispatch',          pool: 'sitwith', kind: 'rss', url: 'https://thedispatch.com/feed/', publisher: 'The Dispatch', priority: 2 },
   { id: 'new-yorker',        pool: 'sitwith', kind: 'rss', url: 'https://www.newyorker.com/feed/magazine/rss', publisher: 'The New Yorker', priority: 2 },
   { id: 'foreign-affairs',   pool: 'sitwith', kind: 'rss', url: 'https://www.foreignaffairs.com/rss.xml', publisher: 'Foreign Affairs', priority: 2 },
-  { id: 'guardian-longread', pool: 'sitwith', kind: 'guardian', query: { tag: 'news/series/the-long-read' }, rssFallback: 'https://www.theguardian.com/news/series/the-long-read/rss', publisher: 'The Guardian', priority: 2 },
+  // RSS, not the API: on 2026-10-04 the API's tag query returned 1 Long Read
+  // for the week while the RSS feed had all ~5, each with a real pubDate.
+  { id: 'guardian-longread', pool: 'sitwith', kind: 'rss', url: 'https://www.theguardian.com/news/series/the-long-read/rss', publisher: 'The Guardian', priority: 2 },
   { id: 'comment',           pool: 'sitwith', kind: 'rss', url: 'https://comment.org/feed/', publisher: 'Comment', priority: 2 },
   { id: 'christianity-today', pool: 'sitwith', kind: 'rss', url: 'https://www.christianitytoday.com/feed/', publisher: 'Christianity Today', priority: 2 },
 ];

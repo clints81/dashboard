@@ -11,9 +11,9 @@ const MAX_ATTEMPTS = 3;
 const UNITS_PER_TICK = 4;
 const KV_TTL = 60 * 60 * 24 * 45;
 const HISTORY_DAYS = 30;
-// Cron runs every 5 min from 10:00 to 11:55 UTC. Whatever hasn't finished by
+// Cron runs every 5 min from 06:00 to 07:55 UTC. Whatever hasn't finished by
 // the last tick gets recorded as failed and the pools are built anyway.
-const LAST_TICK_UTC = { h: 11, m: 50 };
+const LAST_TICK_UTC = { h: 7, m: 50 };
 
 export function chicagoDate(d = new Date()) {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Chicago', year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
@@ -79,7 +79,9 @@ async function runUnit(src, env, ctx, prev) {
     }
     return { status: items.length ? 'ok' : 'empty', attempts, ms: Date.now() - started, ...meta, ...counts, items, at: new Date().toISOString() };
   } catch (e) {
-    return { status: 'error', attempts, ms: Date.now() - started, error: e.message, http: e.http, items: [], at: new Date().toISOString() };
+    // A missing or rejected key won't fix itself on the next tick.
+    const permanent = /^missing /.test(e.message) || e.http === 401;
+    return { status: 'error', attempts, ms: Date.now() - started, error: e.message, http: e.http, ...(permanent && { permanent }), items: [], at: new Date().toISOString() };
   }
 }
 
@@ -88,7 +90,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 function pickBatch(run, all) {
   const pending = SOURCES.filter(s => {
     const u = run.units[s.id];
-    return !u || (u.status === 'error' && u.attempts < MAX_ATTEMPTS);
+    return !u || (u.status === 'error' && !u.permanent && u.attempts < MAX_ATTEMPTS);
   }).sort((a, b) => (b.heavy ? 1 : 0) - (a.heavy ? 1 : 0));
   if (all) return pending;
   const batch = [];
@@ -130,7 +132,10 @@ export async function tick(env, { now = new Date(), force = false, all = false, 
   // Only the scheduled deadline tick forces a finish; manual runs outside the
   // window keep going until every source is done or out of attempts.
   const lastTick = scheduled && now.getUTCHours() === LAST_TICK_UTC.h && now.getUTCMinutes() >= LAST_TICK_UTC.m;
-  let result = { date, ran: batch.map(s => `${s.id}:${run.units[s.id].status}`), remaining };
+  // Per-source detail is returned directly as well as saved, because KV reads
+  // can lag a write by up to a minute.
+  const units = Object.fromEntries(batch.map(s => [s.id, unitSummary(run.units[s.id])]));
+  let result = { date, ran: batch.map(s => `${s.id}:${run.units[s.id].status}`), remaining, units };
   if (remaining === 0 || lastTick) result = { ...result, ...(await finalize(run, env, now)) };
   if (kv) await kv.put(key, JSON.stringify(run), { expirationTtl: KV_TTL });
   return result;

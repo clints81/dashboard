@@ -9,7 +9,10 @@ const UA = 'Mozilla/5.0 (compatible; morning-briefing/1.0; +https://github.com/c
 async function get(url, accept) {
   const r = await fetch(url, { headers: { 'user-agent': UA, accept }, redirect: 'follow' });
   if (!r.ok) {
-    const err = new Error(`HTTP ${r.status}`);
+    // Include the server's own explanation (e.g. NYT's faultstring), which
+    // is what tells a bad key apart from an API not enabled for that key.
+    const body = (await r.text().catch(() => '')).replace(/\s+/g, ' ').slice(0, 200);
+    const err = new Error(`HTTP ${r.status}${body && !body.startsWith('<') ? ': ' + body : ''}`);
     err.http = r.status;
     throw err;
   }
@@ -50,14 +53,7 @@ async function nytNewswire(src, env) {
 }
 
 async function guardian(src, env, ctx) {
-  if (!env.GUARDIAN_API_KEY) {
-    if (src.rssFallback) {
-      const out = await rss(src, src.rssFallback);
-      out.meta.via = 'rss (no GUARDIAN_API_KEY)';
-      return out;
-    }
-    throw new Error('missing GUARDIAN_API_KEY');
-  }
+  if (!env.GUARDIAN_API_KEY) throw new Error('missing GUARDIAN_API_KEY');
   const params = new URLSearchParams({
     ...src.query,
     'order-by': 'newest',
@@ -67,14 +63,18 @@ async function guardian(src, env, ctx) {
     'api-key': env.GUARDIAN_API_KEY,
   });
   const j = JSON.parse(await get(`https://content.guardianapis.com/search?${params}`, 'application/json'));
-  const items = (j.response?.results || [])
-    .filter(r => r.type === 'article')
+  const results = j.response?.results || [];
+  const skipped = {};
+  for (const r of results) if (r.type !== 'article' && r.type !== 'interactive') skipped[r.type] = (skipped[r.type] || 0) + 1;
+  const items = results
+    // Some features are 'interactive' pages; podcasts, live blogs and galleries are skipped.
+    .filter(r => r.type === 'article' || r.type === 'interactive')
     .map(r => ({
       title: r.webTitle, url: r.webUrl, rawDate: r.webPublicationDate,
       summary: stripHtml(r.fields?.trailText || ''), author: r.fields?.byline || '', section: r.sectionName || '',
       word_count: r.fields?.wordcount ? Number(r.fields.wordcount) : null,
     }));
-  return { items, meta: { via: 'api' } };
+  return { items, meta: { via: 'api', ...(Object.keys(skipped).length && { skipped_types: skipped }) } };
 }
 
 // Arts & Letters Daily's feed has no dates and links out to other

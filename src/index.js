@@ -1,6 +1,6 @@
 // briefing-retrieval: pulls the morning candidate pools into KV.
 //
-//   cron  */5 10-11 * * *  → tick() (see run.js for why it's many ticks)
+//   cron  */5 6-7 * * *  → tick() (see run.js for why it's many ticks)
 //
 //   GET  /                 latest run summary + route list
 //   GET  /news[/YYYY-MM-DD]     news candidate pool

@@ -13,7 +13,14 @@ if (existsSync('.dev.vars')) {
   }
 }
 
-const r = await tick(env, { all: true, force: true });
+// In-memory stand-in for KV so retries carry over between passes.
+const store = new Map();
+env.POOL = {
+  async get(k, type) { const v = store.get(k); return v == null ? null : type === 'json' ? JSON.parse(v) : v; },
+  async put(k, v) { store.set(k, v); },
+};
+let r = await tick(env, { all: true, force: true });
+while (!r.finalized) r = await tick(env, { all: true });
 const rows = Object.entries({ ...r.newsDoc.sources, ...r.sitDoc.sources }).map(([id, s]) => ({
   source: id, status: s.status, fetched: s.fetched ?? '', valid: s.valid ?? '', undated: s.undated ?? '',
   in_window: s.in_window, kept: s.kept, via: s.via ?? '', error: s.error ?? '',
