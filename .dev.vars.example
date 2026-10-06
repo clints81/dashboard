@@ -3,3 +3,8 @@
 NYT_API_KEY=""
 GUARDIAN_API_KEY=""
 RUN_KEY=""
+ANTHROPIC_API_KEY=""
+# Only if the key isn't scoped to a workspace (Console → Settings → Workspaces).
+ANTHROPIC_WORKSPACE_ID=""
+NOTION_TOKEN=""
+DASHBOARD_WRITE_KEY=""

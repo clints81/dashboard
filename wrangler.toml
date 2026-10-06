@@ -3,26 +3,51 @@ main = "src/index.js"
 compatibility_date = "2026-10-01"
 workers_dev = true
 
-# Every 5 minutes, 06:00–07:55 UTC (1:00–2:55am CDT; 12:00–1:55am CST).
+# Every 5 minutes, 06:00–09:55 UTC (1:00–4:55am CDT; 12:00–3:55am CST).
 # 06:00 UTC is always after midnight Central, so the run gets the right date.
-# A full run takes ~8 ticks; the rest are retries and slack.
+# The pool takes ~8 ticks (deadline 07:50). The next tick submits the
+# briefing as a batch and later ticks collect it; at 09:30 an unfinished
+# batch is cancelled and the request made directly (see judge.js).
 [triggers]
 # Plus 12:00 UTC (7am CDT / 6am CST): save the Cowork briefing for /compare.
-crons = ["*/5 6-7 * * *", "0 12 * * *"]
+crons = ["*/5 6-9 * * *", "0 12 * * *"]
+
+# The briefing prompt is bundled as text.
+[[rules]]
+type = "Text"
+globs = ["**/*.md"]
+fallthrough = true
+
+[vars]
+# "on": publish to the dashboard, KV story log and Notion story log.
+# Anything else is shadow mode: the edition is saved and shown at /brief only.
+# Leave off until both Cowork briefing tasks are turned off (see DESIGN.md).
+PUBLISH = "off"
+# The model that writes the briefing, and a second model run alongside it in
+# the same batch for comparison at /brief/<date>?ab. Empty COMPARE_MODEL
+# turns the comparison off (it roughly halves its cost again).
+MODEL = "claude-opus-5-5"
+COMPARE_MODEL = "claude-sonnet-5-5"
 
 # Separate from the dashboard Worker's `briefing-store` namespace on purpose.
 [[kv_namespaces]]
 binding = "POOL"
 id = "9ffa5f16b12f4f21a4dd2ed85a2d19ed"
 
-# Read-only link to the dashboard Worker, used by /compare to read Cowork's
-# briefing (GET /). Needed because same-account workers.dev fetches fail.
+# Links to the dashboard Worker. Needed because same-account workers.dev
+# fetches fail. COWORK is read-only (/compare reads Cowork's briefing with
+# GET /); DASHBOARD is where the judgment step PUTs the edition.
 [[services]]
 binding = "COWORK"
+service = "briefing"
+
+[[services]]
+binding = "DASHBOARD"
 service = "briefing"
 
 [observability]
 enabled = true
 
 # Secrets (set with `npx wrangler secret put <NAME>`, never committed):
-#   NYT_API_KEY, GUARDIAN_API_KEY, RUN_KEY
+#   NYT_API_KEY, GUARDIAN_API_KEY, RUN_KEY,
+#   ANTHROPIC_API_KEY, NOTION_TOKEN, DASHBOARD_WRITE_KEY

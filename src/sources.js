@@ -36,6 +36,10 @@ export const SOURCES = [
   { id: 'politico-politics', pool: 'news', kind: 'rss', url: 'https://rss.politico.com/politics-news.xml', publisher: 'Politico', priority: 3 },
   { id: 'politico-congress', pool: 'news', kind: 'rss', url: 'https://rss.politico.com/congress.xml', publisher: 'Politico', priority: 3 },
   { id: 'ars-technica',     pool: 'news', kind: 'rss', url: 'https://feeds.arstechnica.com/arstechnica/index', publisher: 'Ars Technica', priority: 3 },
+  // Added 2026-10-06. WSJ has no politics feed (404); Markets left out (mostly
+  // "Stock Market Today" updates). ~120 items per 36 hours across these five.
+  ...Object.entries({ world: 'RSSWorldNews', us: 'RSSUSnews', business: 'WSJcomUSBusiness', tech: 'RSSWSJD', economy: 'socialeconomyfeed' }).map(([id, f]) => (
+    { id: `wsj-${id}`, pool: 'news', kind: 'rss', url: `https://feeds.content.dowjones.io/public/rss/${f}`, publisher: 'The Wall Street Journal', priority: 3 })),
 
   // ── Something-to-sit-with pool ─────────────────────────────────────────
   { id: 'nyt-magazine',      pool: 'sitwith', kind: 'rss', url: NYT_RSS + 'Magazine.xml', publisher: 'The New York Times', length: 'nyt-search', priority: 0 },
@@ -58,6 +62,20 @@ export const SOURCES = [
   { id: 'guardian-longread', pool: 'sitwith', kind: 'rss', url: 'https://www.theguardian.com/news/series/the-long-read/rss', publisher: 'The Guardian', length: 'page', priority: 2 },
   { id: 'comment',           pool: 'sitwith', kind: 'rss', url: 'https://comment.org/feed/', publisher: 'Comment', length: 'page-text', priority: 2 },
   { id: 'christianity-today', pool: 'sitwith', kind: 'rss', url: 'https://www.christianitytoday.com/feed/', publisher: 'Christianity Today', length: 'page', priority: 2 },
+  // Added 2026-10-06 for the Sunday long read (it replaced the Cowork deep-dive
+  // task). Free outlets publish no wordCount metadata, so their text is counted.
+  // WSJ and the Post have no long-form feed; these are their feature sections,
+  // capped because they're mostly short. Their pages block length checks (WSJ
+  // 401, Post times out), so their read length stays unknown. Clint reads both
+  // through Apple News. Left out on purpose: 1843, Harper's, MIT Technology
+  // Review (no access).
+  { id: 'new-york',          pool: 'sitwith', kind: 'rss', url: 'https://feeds.feedburner.com/nymag/intelligencer', publisher: 'New York', length: 'page-text', priority: 2, cap: 12 },
+  { id: 'noema',             pool: 'sitwith', kind: 'rss', url: 'https://www.noemamag.com/feed/', publisher: 'Noema', length: 'page-text', priority: 2 },
+  { id: 'aeon',              pool: 'sitwith', kind: 'rss', url: 'https://aeon.co/feed.rss', publisher: 'Aeon', length: 'page-text', priority: 2 },
+  { id: 'nautilus',          pool: 'sitwith', kind: 'rss', url: 'https://nautil.us/feed/', publisher: 'Nautilus', length: 'page-text', priority: 2 },
+  { id: 'wsj-arts',          pool: 'sitwith', kind: 'rss', url: 'https://feeds.content.dowjones.io/public/rss/RSSArtsCulture', publisher: 'The Wall Street Journal', length: 'none', priority: 2, cap: 12 },
+  { id: 'wsj-lifestyle',     pool: 'sitwith', kind: 'rss', url: 'https://feeds.content.dowjones.io/public/rss/RSSLifestyle', publisher: 'The Wall Street Journal', length: 'none', priority: 2, cap: 12 },
+  { id: 'wapo-style',        pool: 'sitwith', kind: 'rss', url: 'https://feeds.washingtonpost.com/rss/lifestyle/style', publisher: 'The Washington Post', length: 'none', priority: 2, cap: 12 },
 ];
 
 export const NEWS_WINDOW_HOURS = 36;

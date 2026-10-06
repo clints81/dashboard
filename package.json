@@ -6,9 +6,13 @@
     "dev": "wrangler dev --test-scheduled",
     "deploy": "wrangler deploy",
     "dry-run": "node scripts/dry-run.mjs",
-    "tail": "wrangler tail"
+    "tail": "wrangler tail",
+    "judge-dry-run": "node scripts/judge-dry-run.mjs"
   },
   "devDependencies": {
     "wrangler": "^4.147.0"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.131.0"
   }
 }

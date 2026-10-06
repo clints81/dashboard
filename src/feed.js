@@ -58,7 +58,7 @@ export function parseFeed(xml) {
   });
 }
 
-const TRACKING = /^(utm_|smid$|smtyp$|ref$|referrer$|partner$|cmp$|src$|fbclid$|gclid$|mc_|_hs|at_|itm_|intcmp$)/i;
+const TRACKING = /^(utm_|smid$|smtyp$|ref$|referrer$|partner$|cmp$|src$|fbclid$|gclid$|mc_|_hs|at_|itm_|intcmp$|mod$)/i;
 
 export function canonicalUrl(u) {
   try {
