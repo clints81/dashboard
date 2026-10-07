@@ -69,7 +69,9 @@ const host = u => { try { return new URL(u).hostname.replace(/^www\./, ''); } ca
 // ── Context: story log, deep-dive log, the week's briefings ──────────────
 
 // Fatigue reads KV. Until KV holds a full week (the first week after
-// cutover, and all of shadow mode), missing days come from Notion.
+// cutover, and all of shadow mode), missing days come from Notion. A day
+// still missing (in shadow mode, a day Cowork failed and logged nothing)
+// comes from the Worker's own edition for that day, so its repeats count.
 export async function loadHistory(env, date) {
   const since = shiftDate(date, -LOG_DAYS);
   const kvEntries = (env.POOL && (await env.POOL.get('storylog', 'json'))?.entries) || [];
@@ -84,6 +86,14 @@ export async function loadHistory(env, date) {
     } catch (e) {
       notion_error = e.message;
     }
+  }
+  const have = new Set(entries.map(e => e.date));
+  const missing = Array.from({ length: LOG_DAYS }, (_, i) => shiftDate(date, -(i + 1))).filter(d => !have.has(d));
+  const own = env.POOL ? await Promise.all(missing.map(d => env.POOL.get(`brief:${d}`, 'json'))) : [];
+  const filled = own.map((b, i) => b?.state === 'done' && b.stories && { ...logEntry(b), date: missing[i] }).filter(Boolean);
+  if (filled.length) {
+    entries.push(...filled);
+    source += ` + own editions (${filled.map(e => e.date.slice(5)).join(', ')})`;
   }
   entries.sort((a, b) => a.date.localeCompare(b.date));
   return { entries, source, notion_error };
@@ -301,9 +311,12 @@ export function verify(out, { byId, date, refMs, ctx }) {
     if (!ok.length) problems.push(`dropped "${e.title}": nothing in the request behind it`);
     return ok;
   };
-  const capTo = (list, max, name, exempt = () => false) => {
-    while (list.filter(x => !exempt(x)).length > max) {
-      const i = list.findLastIndex(x => !exempt(x));
+  // counts: which entries count toward max. keep: entries never trimmed
+  // (the last-added others go first).
+  const capTo = (list, max, name, { counts = () => true, keep = () => false } = {}) => {
+    while (list.filter(counts).length > max) {
+      const i = list.findLastIndex(x => counts(x) && !keep(x));
+      if (i < 0) break;
       problems.push(`trimmed "${list[i].title}": over the ${name} maximum of ${max}`);
       list.splice(i, 1);
     }
@@ -360,10 +373,11 @@ export function verify(out, { byId, date, refMs, ctx }) {
       url: l.url, link_publisher: l.publisher, items: ok.map(id => ref(id, byId.get(id))),
     });
   }
-  // Weekend floor stories sit outside the 0–3 fresh stories. On weekdays
-  // they count, but a category's only floor story is never the one trimmed.
-  const onlyFloor = x => FLOOR.includes(x.category) && stories.filter(y => y.category === x.category).length === 1;
-  stories = sortByTopic(capTo(stories, cfg.stories, 'story', edition === 'weekday' ? onlyFloor : x => x.floor));
+  // On weekdays every story counts toward 12, but a floor category's only
+  // story is never the one trimmed. Weekend floor stories sit outside the
+  // 0–3 fresh stories.
+  const onlyOfFloorCat = x => FLOOR.includes(x.category) && stories.filter(y => y.category === x.category).length === 1;
+  stories = sortByTopic(capTo(stories, cfg.stories, 'story', edition === 'weekday' ? { keep: onlyOfFloorCat } : { counts: x => !x.floor }));
 
   // Sit-with pick (on Sunday, the long read).
   let sit_with = null;
@@ -520,7 +534,7 @@ export async function judgeStep(env, prompt, { now = new Date(), force = false, 
   if (brief?.running_since && nowMs - Date.parse(brief.running_since) < STALE_MS) return { date, state: brief.state, running: true };
 
   const [newsDoc, sitDoc] = await Promise.all([kv.get(`news:${date}`, 'json'), kv.get(`sitwith:${date}`, 'json')]);
-  const base = { date, ...editionFor(date), publish, model: primary, compare_model: compareModel, errors: brief?.errors || [], submits: brief?.submits || 0, direct_attempts: brief?.direct_attempts || 0 };
+  const base = { date, ...editionFor(date), publish, model: primary, compare_model: compareModel, errors: brief?.errors || [], submits: brief?.submits || 0, direct_attempts: brief?.direct_attempts || 0, batch_id: brief?.batch_id, submitted_at: brief?.submitted_at };
   const logError = (stage, e) => base.errors.push({ at: new Date().toISOString(), stage, error: e.message || String(e), ...(e.usage && { usage: e.usage }) });
 
   const fail = async reason => {

@@ -114,6 +114,10 @@ dashboard never shows yesterday's briefing as today's.
 - `storylog` in KV holds the last 7 days and is what fatigue reads.
   Until it holds a full week, missing days come from the Notion story log
   (`33af8d21…`), so fatigue carries across the handover from Cowork.
+  A day in neither (in shadow mode, a day Cowork failed and logged
+  nothing) comes from the Worker's own edition for that day. Without
+  this, shadow editions repeated stories from the day before (found
+  2026-10-07: Jim Bakker's death ran two days running).
 - Each published edition is **appended** to the Notion story log as a
   readable archive (no longer pruned; its header text saying entries are
   removed after 7 days is now out of date).
