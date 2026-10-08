@@ -19,10 +19,10 @@ globs = ["**/*.md"]
 fallthrough = true
 
 [vars]
-# "on": publish to the dashboard, KV story log and Notion story log.
+# "on": publish to the dashboard, KV story log and Notion logs.
 # Anything else is shadow mode: the edition is saved and shown at /brief only.
-# Leave off until both Cowork briefing tasks are turned off (see DESIGN.md).
-PUBLISH = "off"
+# Turned on 2026-10-08, after the Cowork tasks were switched off.
+PUBLISH = "on"
 # The model that writes the briefing, and a second model run alongside it in
 # the same batch for comparison at /brief/<date>?ab. Empty COMPARE_MODEL
 # turns the comparison off (it roughly halves its cost again).

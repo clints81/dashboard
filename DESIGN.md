@@ -147,7 +147,7 @@ fetches fail with error 1042). The dashboard renders `title`, `summary`,
 `category` and `synthesis` with `innerHTML`, so the Worker HTML-escapes
 those; `sit_with` uses `textContent` and is sent raw.
 
-### Shadow mode until cutover
+### Shadow mode until cutover (cut over 2026-10-08)
 `PUBLISH` gates every outward write (dashboard, KV story log, both
 Notion logs). While it's `off`, editions are saved to `brief:<date>` and
 shown at `/brief` only. Running alongside Cowork would mean each
