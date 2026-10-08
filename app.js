@@ -574,10 +574,10 @@ function renderWorkout() {
     </a>`;
 }
 
-// ── Briefing + Sit With — live from Notion ─────────────────────────────
-// The briefing skill PUTs today's JSON to a Cloudflare Worker each morning.
-// The Worker serves it back publicly, with CORS headers so the browser can read it.
-// No key needed to read; the write key lives only in the briefing skill.
+// ── Briefing + Sit With ────────────────────────────────────────────────
+// The briefing-retrieval Worker PUTs today's JSON to the dashboard Worker
+// overnight. The dashboard Worker serves it back publicly, with CORS headers
+// so the browser can read it. No key needed to read.
 
 const BRIEFING_URL = 'https://briefing.clintsievers.workers.dev/';
 
@@ -635,7 +635,7 @@ async function loadBriefing() {
     if (headlinesEl) headlinesEl.innerHTML = `
       <div class="headline-item">
         <span class="headline-num">→</span>
-        <span class="headline-text">No briefing yet today. It lands at 6am on weekdays.</span>
+        <span class="headline-text">No briefing yet. It's written overnight, usually by 3am.</span>
       </div>`;
 
     // Fall back to config for sit-with

@@ -1,6 +1,6 @@
 # Morning Dashboard — Architecture Reference
 
-Last updated: September 3, 2026
+Last updated: October 8, 2026
 
 ## What this is
 A personal morning dashboard for Clint Sievers, hosted on GitHub Pages. Plain HTML/CSS/JS — no framework, no build step. It exists to replace aimless scrolling with a purposeful briefing.
@@ -33,14 +33,14 @@ It serves these routes:
 | `/tasks` | GET | Queries the JELC treasurer Notion database (`env.NOTION_TOKEN`) for what's due and recently settled. CORS `*`. 5-min cache. |
 | `/devotion` | GET | Fetches the WELS Daily Devotions RSS feed and extracts verse, reference, title, excerpt. No secret. CORS `*`. 3-hr cache. |
 
-Write key lives in 1Password and in the briefing skill text. Never in the repo. The other secrets (`CAL_ICS_1`, `NOTION_TOKEN`) live in Cloudflare → Settings → Variables and Secrets, separate from the code editor.
+The write key is `WRITE_KEY` in this Worker's Cloudflare settings, with copies in 1Password and as the `DASHBOARD_WRITE_KEY` secret on the `briefing-retrieval` Worker. It was rotated 2026-10-08, when it came out of the Cowork task text. Never in the repo. The other secrets (`CAL_ICS_1`, `NOTION_TOKEN`) live in Cloudflare → Settings → Variables and Secrets, separate from the code editor.
 
 Each route is one top-level name in `worker.js` (`handleSports`, `CALENDAR`, `TASKS`) plus one line in the `fetch` router. Follow that convention when adding a route — it's what keeps per-route constants (each block has its own `CACHE_SECONDS`) from colliding.
 
 ### Why a Worker exists at all
 The dashboard is served from `clints81.github.io`. Browsers refuse to let a page read a response from another origin unless that origin sends CORS headers saying it's allowed. Notion doesn't. `nytimes.com` doesn't. Server-side fetches aren't subject to that rule, so the Worker fetches on the dashboard's behalf and re-serves the result with `access-control-allow-origin: *`.
 
-This is also why GitHub was abandoned as the delivery route: `git push` and GitHub API writes are both blocked from the Cowork cloud sandbox. Known product gap. Do not revisit.
+History: while the briefing ran in Cowork, GitHub was ruled out as the delivery route because `git push` and GitHub API writes were blocked from Cowork's cloud sandbox. That's why the briefing lands in this Worker's KV rather than in the repo.
 
 ---
 
@@ -50,7 +50,7 @@ This is also why GitHub was abandoned as the delivery route: `git push` and GitH
 - **Weather** — Open-Meteo (`api.open-meteo.com`), free, no key, CORS-safe. Lat/lon in `config.js`. Hourly + 5-day.
 - **Sports** — Worker `/sports` route. See below.
 - **On This Day** — Wikipedia `/feed/onthisday/events/{month}/{day}`. 4 events, seeded daily random.
-- **Briefing** — Worker root route. Written each morning by the Cowork briefing skill.
+- **Briefing** — Worker root route. Written overnight by the `briefing-retrieval` Worker. See The briefing system.
 - **Calendar** — Worker `/calendar` route. Today's events from Google/iCloud ICS feeds. See below.
 - **Treasurer tasks** — Worker `/tasks` route. JELC tasks from Notion. See below.
 - **Daily devotion** — Worker `/devotion` route. WELS Daily Devotions RSS. See below.
@@ -162,24 +162,28 @@ If the WELS template ever changes and the verse stops parsing, `sources.wels` re
 
 ## The briefing system
 
-Two Cowork skills, cloud-hosted, scheduled:
-- **Weekday briefing** — Mon–Fri, 10–12 stories
-- **Weekend briefing** — Sat–Sun, 6–8 stories
+Since 2026-10-08 the briefing is written by a separate Cloudflare Worker, **`briefing-retrieval`** (repo `clints81/morning-briefing-retrieval`; the reasoning behind it is in that repo's `DESIGN.md`). It replaced the Cowork briefing and deep-dive tasks, which had stopped running reliably.
 
-Pipeline:
-1. Read story log from Notion (`33af8d21-7e64-8184-a001-db0a563a70b9`) for fatigue rules
-2. Research stories with freshness-first queries
-3. Select a "something to sit with" long-read
-4. Write HTML email → Gmail draft
-5. **Step 8.5** — PUT briefing JSON to the Worker; append "Dashboard write: OK/FAILED" to the email
-6. Update the Notion story log
+Each night, Central time:
+1. From 1am (midnight in winter), it builds a candidate pool from feeds and APIs: NYT, WSJ, Guardian, BBC, NPR, Politico and Ars Technica for news; long-form outlets for the sit-with pick.
+2. When the pool is ready, usually around 2:30am, it sends the pool and the story log to the Claude API as a batch at half price. Results are usually back within minutes. If not by 4:30am (3:30 in winter), it makes the call directly.
+3. It checks every pick against the pool, prefers NYT links, then PUTs the JSON to this dashboard's Worker (`/`, `X-Write-Key`) and logs the day's stories.
 
-### The two Notion pages are not interchangeable
-- `33af8d21…` — **story log**. Read in Step 2, written in Step 10. **Load-bearing.** Deleting either half breaks story fatigue silently: no error, just repeats.
-- `367f8d21…` — **dashboard data page**. Written in Step 9. Nothing reads it. Superseded by the Worker; safe to delete.
+Editions:
+- **Weekday:** 10–12 stories, a line or two each, plus a one- or two-sentence synthesis.
+- **Saturday, "the week that was":** threads from the week (`Week · …`), plus up to 3 new stories (`New · …`).
+- **Sunday, "the week ahead":** things to watch (`Ahead · …`, timing first), up to 3 new stories, and the Sunday long read in the sit-with card.
 
-### Egress allowlist
-Cowork has an editable egress allowlist. News source domains get added there. This — not the sandbox — was the real blocker in May 2026. If a fetch fails from Cowork, check the allowlist first.
+`· floor` on a category marks a Technology, Science or Religion story included to meet the one-of-each floor rather than on merit. A short night is published with "Partial edition: …" at the start of the synthesis; a failed night shows "No briefing this morning…". Either way, yesterday's briefing never sits there looking like today's.
+
+The full edition, with every source behind each story and what was dropped, is at `briefing-retrieval.clintsievers.workers.dev/brief`.
+
+### The Notion pages
+- `33af8d21…` — **story log**. The Worker appends each day's stories here as a readable archive; it is no longer pruned to 7 days. Story fatigue reads the Worker's own 7-day copy in KV.
+- `3a2f8d21…` — **deep-dive log**. Each Sunday long read is appended, and it's read for the 28-day no-repeat rule. Load-bearing: don't delete it.
+- `367f8d21…` — old dashboard data page. Nothing reads it; safe to delete.
+
+Both logs need the Worker's Notion integration connected (page ⋯ → Connections).
 
 ---
 
@@ -188,7 +192,7 @@ Cowork has an editable egress allowlist. News source domains get added there. Th
 | Section | Source | Notes |
 |---|---|---|
 | Weather | Open-Meteo | Live; retry + refresh |
-| Briefing synthesis + headlines | Worker `/` | Written by skill |
+| Briefing synthesis + headlines | Worker `/` | Written by `briefing-retrieval` |
 | Something to sit with | Worker `/` | config.js fallback |
 | Your teams | Worker `/sports` | Team news, no scores |
 | Today's workout | Static link | See below |
@@ -241,9 +245,7 @@ Before filtering on any field, ask whether it carries the meaning you think it d
 - JELC Council numbers (pulled from the JELC Council dashboard, not hand-maintained)
 - ~~Daily Bible verse~~ — **done** via `/devotion` (WELS Daily Devotions).
 - Personal daily brief alongside the news briefing
-- Shorter, punchier briefing summaries (Step 6 + JSON `summary` field)
-- Delete Step 9 from both briefing skills
-- Add Step 8.5 to the weekend skill — **check whether this is done**
+- ~~Shorter, punchier briefing summaries~~ — **done**: one or two lines each since the move to `briefing-retrieval` (Oct 2026).
 - Day summary sentence is still static; improves once Calendar is wired
 - ~~Decide whether league fill earns its slots~~ — capped at 3, headline-only (Oct 2026). Revisit if the card feels thin.
 - Cleaner Worker URL via a `clintsievers.com` subdomain (deliberately deferred)
