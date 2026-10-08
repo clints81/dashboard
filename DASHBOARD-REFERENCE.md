@@ -54,7 +54,6 @@ This is also why GitHub was abandoned as the delivery route: `git push` and GitH
 - **Calendar** — Worker `/calendar` route. Today's events from Google/iCloud ICS feeds. See below.
 - **Treasurer tasks** — Worker `/tasks` route. JELC tasks from Notion. See below.
 - **Daily devotion** — Worker `/devotion` route. WELS Daily Devotions RSS. See below.
-- **Retrieval check** — `briefing-retrieval.clintsievers.workers.dev/compare?json`, a *separate* Worker (repo `clints81/morning-briefing-retrieval`). Temporary card for the Oct 2026 comparison week: pool ready time, failing sources, and how many of Cowork's stories matched the pool. Links to the full `/compare` page. Remove it (card in `index.html`, `loadRetrieval()` in `app.js`) once the judgment step moves off Cowork.
 
 All of these go through `fetchRetry()` in `app.js`: one retry after 2.5s, and a non-200 is treated as failure rather than parsed as JSON.
 

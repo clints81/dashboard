@@ -553,50 +553,6 @@ async function loadDevotion() {
   }
 }
 
-// ── Retrieval check (comparison week) ──────────────────────────────────
-// The new retrieval Worker (briefing-retrieval) builds a candidate pool at
-// 1am; this card says whether it ran, whether any source failed, and how
-// many of Cowork's stories it found a match for. The real check happens on
-// the /compare page it links to. Temporary: remove once the judgment step
-// moves off Cowork.
-
-async function loadRetrieval() {
-  const el = $('retrieval-content');
-  const badge = $('retrieval-badge');
-  if (!el) return;
-
-  const base = CONFIG.retrieval?.url || 'https://briefing-retrieval.clintsievers.workers.dev';
-  const link = `<a class="retrieval-link" href="${base}/compare" target="_blank" rel="noopener">Open comparison →</a>`;
-
-  try {
-    const res = await fetchRetry(`${base}/compare?json&t=${Date.now()}`);
-    const c = await res.json();
-
-    if (!c.pool_ready_at) {
-      el.innerHTML = `<span class="retrieval-bad">No pool for today yet</span>${link}`;
-      if (badge) badge.textContent = 'missing';
-      return;
-    }
-
-    const ready = new Date(c.pool_ready_at).toLocaleTimeString('en-US', { timeZone: 'America/Chicago', hour: 'numeric', minute: '2-digit' });
-    const failing = c.failing?.length
-      ? `<span class="retrieval-bad">Failing: ${escapeHTML(c.failing.map(f => f.split(':')[0]).join(', '))}</span>`
-      : `<span>All sources ok</span>`;
-    let cowork = `<span>Waiting on Cowork's briefing</span>`;
-    if (c.tally) {
-      const t = c.tally;
-      const found = t['same link'] + t.likely;
-      cowork = `<span>Cowork: ${found} matched · ${t.check} to check · ${t['not found'] ? `<span class="retrieval-bad">${t['not found']} not found</span>` : '0 not found'}</span>`;
-    }
-    el.innerHTML = `<span>Pool ready ${escapeHTML(ready)} · ${c.news_count} news · ${c.sitwith_count} sit-with</span>${failing}${cowork}${link}`;
-    if (badge) badge.textContent = c.failing?.length ? `${c.failing.length} failing` : 'ok';
-
-  } catch (e) {
-    el.innerHTML = `<div class="error">Retrieval check unavailable</div>`;
-    if (badge) badge.textContent = '—';
-  }
-}
-
 // ── Orangetheory daily workout ─────────────────────────────────────────
 // Reddit blocks programmatic reads of its JSON endpoints (search.json returns
 // "blocked by network security" even from a plain browser tab), so there's no
@@ -711,7 +667,6 @@ function loadLiveData() {
   loadCalendar();
   loadTasks();
   loadDevotion();
-  loadRetrieval();
   loadOnThisDay();
   loadBriefing(); // handles both briefing and sit-with
 }

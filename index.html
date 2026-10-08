@@ -444,25 +444,6 @@
       #tasks-content { grid-template-columns: 1fr; gap: 14px; }
     }
 
-    /* ── RETRIEVAL CHECK ── */
-    #retrieval-content {
-      display: flex;
-      flex-wrap: wrap;
-      align-items: baseline;
-      gap: 6px 18px;
-      font-size: 12px;
-      color: var(--ink-3);
-    }
-    .retrieval-bad { color: var(--accent); font-weight: 500; }
-    .retrieval-link {
-      margin-left: auto;
-      font-size: 11px;
-      color: var(--accent);
-      text-decoration: none;
-      border-bottom: 1px solid transparent;
-    }
-    .retrieval-link:hover { border-bottom-color: var(--accent); }
-
     /* ── DAILY DEVOTION ── */
     .devotion-verse {
       font-family: var(--serif);
@@ -808,17 +789,6 @@
     </div>
 
     <div class="band">The rest of the morning</div>
-
-    <!-- ── RETRIEVAL CHECK (col 12) — comparison week, Oct 2026 ── -->
-    <div class="card col-12">
-      <div class="card-label">
-        Retrieval check
-        <span class="card-label-badge" id="retrieval-badge">—</span>
-      </div>
-      <div id="retrieval-content">
-        <div class="loading">Checking this morning's pool…</div>
-      </div>
-    </div>
 
     <!-- ── TREASURER TASKS (col 12) ── -->
     <div class="card col-12">
