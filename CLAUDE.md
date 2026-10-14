@@ -9,5 +9,5 @@
 - Decided-but-unbuilt work lives in the Backlog section of the
   reference doc. Add to it when a brief defers something; remove
   items when they ship.
-- Run node --check on every JS file. Don't commit; Clint reviews
-  and commits in GitHub Desktop.
+- Run node --check on every JS file. Never commit without asking; Clint reviews
+  and approves changes. Then commit.
