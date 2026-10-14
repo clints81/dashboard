@@ -32,26 +32,6 @@ const CONFIG = {
     subreddit: "orangetheory",
   },
 
-  // ── Journal nudge ────────────────────────────
-  // Add your own prompts. One is picked each day.
-  // windowCloses: time in HH:MM (24h) local — nudge after this changes
-  journalStreak: 23,
-  journalWindowCloses: "08:00",
-  journalPrompts: [
-    "What's one decision from last week you'd make the same again, knowing what you know now?",
-    "What's something you've been avoiding that's actually small?",
-    "Who showed up for you this week, and did you tell them?",
-    "What's the gap between how you want to show up and how you actually did today?",
-    "What would you do differently about yesterday if you had it back?",
-    "Name one thing you're grateful for that you haven't said out loud.",
-    "What's a question you've been sitting with this week?",
-    "Where did you feel most like yourself recently?",
-    "What assumption are you carrying that might not be true?",
-    "What's one thing your son taught you this week, even if he didn't mean to?",
-    "When did you feel most present today, and what made that possible?",
-    "What's something you know but haven't quite believed yet?",
-  ],
-
   // ── Something to sit with ────────────────────
   // FALLBACK ONLY — the briefing skill writes this live after each run.
   // This shows only if the Notion fetch fails (e.g. before first briefing run).
@@ -64,18 +44,5 @@ const CONFIG = {
     readTime: "—",
     url: "#",
   },
-
-  // ── Slow burns ───────────────────────────────
-  // Things that matter but don't have weekly check-ins.
-  // lastTouched: days since you last worked on this
-  slowBurns: [
-    { name: "Personal website",        lastTouched: 34 },
-    { name: "LinkedIn rebrand",        lastTouched: 8  },
-    { name: "Jasper's Game Workshop",  lastTouched: 12 },
-    { name: "Coffee logging app",      lastTouched: 21 },
-    { name: "Obsidian vault setup",    lastTouched: 45 },
-  ],
-  // Flag as overdue after N days
-  slowBurnOverdue: 21,
 
 };

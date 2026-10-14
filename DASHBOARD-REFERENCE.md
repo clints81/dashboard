@@ -31,7 +31,8 @@ It serves these routes:
 | Route | Method | What it does |
 |---|---|---|
 | `/` | GET | Returns the latest briefing JSON from KV (`env.BRIEFING`, key `latest`). CORS `*`. |
-| `/` | PUT | Writes briefing JSON to KV. Requires `X-Write-Key` header matching `env.WRITE_KEY`. |
+| `/` | PUT | Writes briefing JSON to KV. Requires `X-Write-Key` header matching `env.WRITE_KEY`. Then records the sit-with pick in the archive; reports how that went in `X-Sitwith-Archive`. |
+| `/sitwith` | GET | Past sit-with picks from the archive (KV key `sitwith-archive`). No key. CORS `*`. `no-store`. See The sit-with archive. |
 | `/sports` | GET | Fetches, filters, and caches team/league news from RSS. CORS `*`. 20-min cache. |
 | `/calendar` | GET | Parses ICS calendar feeds (`env.CAL_ICS_1` / `CAL_ICS_2`) for today's events. **Requires `X-Read-Key`.** CORS `*`. 5-min cache. |
 | `/tasks` | GET | Queries the JELC treasurer Notion database (`env.NOTION_TOKEN`) for what's due and recently settled. **Requires `X-Read-Key`.** CORS `*`. 5-min cache. |
@@ -39,10 +40,10 @@ It serves these routes:
 
 The write key is `WRITE_KEY` in this Worker's Cloudflare settings, with copies in 1Password and as the `DASHBOARD_WRITE_KEY` secret on the `briefing-retrieval` Worker. It was rotated 2026-10-08, when it came out of the Cowork task text. Never in the repo. The other secrets (`CAL_ICS_1`, `NOTION_TOKEN`, `READ_KEY`) live in Cloudflare → Settings → Variables and Secrets, separate from the code editor.
 
-Each route is one top-level name in `worker.js` (`handleSports`, `CALENDAR`, `TASKS`, `DEVOTION`) plus one line in the `fetch` router. Follow that convention when adding a route — it's what keeps per-route constants (each block has its own `CACHE_SECONDS`) from colliding.
+Each route is one top-level name in `worker.js` (`handleSports`, `CALENDAR`, `TASKS`, `DEVOTION`, `SITWITH`) plus one line in the `fetch` router. Follow that convention when adding a route — it's what keeps per-route constants (each block has its own `CACHE_SECONDS`) from colliding.
 
 ### Read key
-`/calendar` and `/tasks` return Clint's schedule and the church's payables, so they need a read key. Every other route stays public.
+`/calendar` and `/tasks` return Clint's schedule and the church's payables, so they need a read key. Every other route stays public, `/sitwith` included: the picks aren't personal, and the computer bookmark should show them without a key.
 
 Where the key lives:
 - `READ_KEY` secret in this Worker's Cloudflare settings
@@ -70,8 +71,9 @@ History: while the briefing ran in Cowork, GitHub was ruled out as the delivery 
 ### Live (fetched on page load, and again on foreground/reconnect)
 - **Weather** — Open-Meteo (`api.open-meteo.com`), free, no key, CORS-safe. Lat/lon in `config.js`. Hourly + 5-day.
 - **Sports** — Worker `/sports` route. See below.
-- **On This Day** — Wikipedia `/feed/onthisday/events/{month}/{day}`. 4 events, seeded daily random.
+- **On This Day** — Wikipedia `/feed/onthisday/events/{month}/{day}`. 3 events, seeded daily random, each clamped to 3 lines.
 - **Briefing** — Worker root route. Written overnight by the `briefing-retrieval` Worker. See The briefing system.
+- **Sit-with archive** — Worker `/sitwith` route. Past picks for the "Earlier this week" strip and the Sunday "Last week's reads" card. See The sit-with archive.
 - **Calendar** — Worker `/calendar` route. Today's events from Google/iCloud ICS feeds. See below.
 - **Treasurer tasks** — Worker `/tasks` route. JELC tasks from Notion. See below.
 - **Daily devotion** — Worker `/devotion` route. WELS Daily Devotions RSS. See below.
@@ -79,8 +81,6 @@ History: while the briefing ran in Cowork, GitHub was ruled out as the delivery 
 All of these go through `fetchRetry()` in `app.js`: one retry after 2.5s, and a non-200 is treated as failure rather than parsed as JSON. The thrown error carries `.status`. A 401 is not retried, so the key-protected cards can tell "locked" from "broken".
 
 ### Static (config.js)
-- Journal streak, journal prompts (one picked per day by day-of-year), window close time
-- Slow burns (names + `lastTouched` day counts)
 - Fallback "something to sit with" (shown only if the briefing fetch fails)
 - Orangetheory subreddit name
 - Sports cap (`maxItems`)
@@ -182,6 +182,37 @@ If the WELS template ever changes and the verse stops parsing, `sources.wels` re
 
 ---
 
+## The sit-with archive
+
+Added 2026-10-14. The sit-with card used to show one pick and forget it. The archive keeps them, so the week's reads stay reachable.
+
+### Storage
+KV key `sitwith-archive` in `env.BRIEFING` (the same namespace as `latest`). A JSON array of `{date, day, type, headline, desc, source, read_time, url}`, newest first, one entry per date, capped at 60. A re-run on the same date replaces that date's entry. A failed night's briefing carries no pick, so it never erases one already recorded.
+
+**Why the dashboard keeps its own copy** instead of reading `briefing-retrieval`'s stored briefs: those expire after 45 days, and this Worker can't call retrieval by URL on the same account (Cloudflare error 1042). The service binding only runs retrieval → dashboard.
+
+### How it's written
+The PUT to `/` writes `latest` first, then records **both** the previous `latest` and the incoming body. Recording the previous one means a failed archive write is caught up the next morning, when yesterday's briefing is the previous `latest`.
+
+The archive must never fail the briefing write. Every archive step is guarded, the PUT still returns `OK`, and the outcome goes in a response header, `X-Sitwith-Archive: ok | error: <msg>`. An archive that isn't a JSON array is reported (`error: archive unreadable, not overwritten`) and left alone so it can be inspected. To reset it, delete the `sitwith-archive` key in the KV namespace. The next two mornings rebuild it.
+
+### `GET /sitwith`
+Returns `{items, sources, generated}`. Public, CORS `*`, `cache-control: no-store`.
+- `items` merges three lists, lowest to highest precedence: `SEED`, the archive, the current `latest`. So `items[0]` is always the pick shown in the hero card.
+- `?days=N` keeps picks dated within the last N days (Chicago), today included. The page asks for 14.
+- `sources.archive`: `ok (N)`, `unreadable`, or `error: …`. `sources.latest`: `ok` or `no pick`.
+
+`SEED` holds the picks from Oct 8–13, 2026, copied from retrieval's `/brief/<date>?json` (the `sit_with` block it sent to the dashboard), so the strip wasn't empty on its first week. Delete it after Oct 21, 2026 (in the Backlog).
+
+### On the page
+- **Mon–Sat** (Chicago date): an "Earlier this week" strip at the foot of the sit-with card, under a thin divider. It lists the six days before the hero's date, newest first, in two columns reading down the left, then the right. Each line shows the short weekday, the headline (one line, ellipsis) and the source, and links to the piece. The strip is hidden when there are no earlier picks. If this morning has no pick (the hero shows its placeholder), it counts back from today instead.
+- **Sunday:** no strip. A full-width "Last week's reads" card sits below the sit-with card, above the band, covering the seven days before today, Sunday through Saturday. Each entry shows weekday + type, the headline in the serif face, the description, and source · read time. The badge reads "N pieces".
+- If `sources.archive` isn't `ok`, or the fetch fails, the strip (or the Sunday card) says **"Archive unavailable"**. It's never hidden, so a broken archive can't look like a quiet week.
+- Upstream text can arrive entity-encoded (`&#39;`). The page decodes it, then escapes it. The hero card decodes too.
+- `renderSitArchive(data, 'YYYY-MM-DD')` is split from the fetch, so the Sunday card can be checked on any day from the console.
+
+---
+
 ## The briefing system
 
 Since 2026-10-08 the briefing is written by a separate Cloudflare Worker, **`briefing-retrieval`** (source in `briefing-retrieval/` in this repo, moved here 2026-10-14 from `clints81/morning-briefing-retrieval`; the reasoning behind it is in `briefing-retrieval/DESIGN.md`). It replaced the Cowork briefing and deep-dive tasks, which had stopped running reliably.
@@ -197,6 +228,8 @@ Editions:
 - **Sunday, "the week ahead":** things to watch (`Ahead · …`, timing first), up to 3 new stories, and the Sunday long read in the sit-with card.
 
 `· floor` on a category marks a Technology, Science or Religion story included to meet the one-of-each floor rather than on merit. A short night is published with "Partial edition: …" at the start of the synthesis; a failed night shows "No briefing this morning…". Either way, yesterday's briefing never sits there looking like today's.
+
+On the page, a briefing whose `date` isn't today gets the "No briefing yet today. Showing …'s" line. "Today" is the **Chicago** date (`chicagoDate()` in `app.js`). Until 2026-10-14 the check used `toISOString()`, which is UTC and rolls over to tomorrow at 7pm Central (6pm in winter), so every evening the current briefing was labeled as stale.
 
 The full edition, with every source behind each story and what was dropped, is at `briefing-retrieval.clintsievers.workers.dev/brief`.
 
@@ -215,15 +248,17 @@ Both logs need the Worker's Notion integration connected (page ⋯ → Connectio
 |---|---|---|
 | Weather | Open-Meteo | Live; retry + refresh |
 | Briefing synthesis + headlines | Worker `/` | Written by `briefing-retrieval` |
-| Something to sit with | Worker `/` | config.js fallback |
+| Something to sit with | Worker `/` | config.js fallback; "Earlier this week" strip from `/sitwith` (Mon–Sat) |
+| Last week's reads | Worker `/sitwith` | Sundays only |
 | Your teams | Worker `/sports` | Team news, no scores |
 | Today's workout | Static link | See below |
 | Today (calendar) | Worker `/calendar` | Live; ICS feeds, Chicago time; read key |
 | Treasurer tasks | Worker `/tasks` | Live; JELC Notion, due + settled; read key |
 | Daily devotion | Worker `/devotion` | Live; WELS RSS, verse + excerpt |
-| Journal nudge | config.js | |
-| Slow burns | config.js | |
-| On this day | Wikipedia | Live |
+| On this day | Wikipedia | Live; 3 events |
+
+### Removed (Oct 14, 2026)
+The day-summary bar ("The goal before noon is one outreach"), Journal nudge, and Slow burns. All three were static placeholders filled from config.js. Markup, CSS, JS, and config all deleted, along with `renderSitWith()`, a config-only sit-with renderer nothing called.
 
 ### Removed (Sept 1, 2026)
 Job search pipeline, JELS expansion, NYT Games. Markup, CSS, JS, and config all deleted.
@@ -262,16 +297,19 @@ Before filtering on any field, ask whether it carries the meaning you think it d
 ---
 
 ## Backlog
-- ~~Google Calendar integration~~ — **done** via `/calendar`. Apple/iCloud still pending: the `CAL_ICS_2` slot is wired and unset.
+- ~~Google Calendar integration~~ — **done** via `/calendar`. Apple/iCloud still pending: the `CAL_ICS_2` slot is wired and unset (see Family calendar below).
 - ~~Notion church tasks~~ — **done** via `/tasks` (Treasurer tasks card).
 - JELC Council numbers (pulled from the JELC Council dashboard, not hand-maintained)
 - ~~Daily Bible verse~~ — **done** via `/devotion` (WELS Daily Devotions).
 - Personal daily brief alongside the news briefing
 - ~~Shorter, punchier briefing summaries~~ — **done**: one or two lines each since the move to `briefing-retrieval` (Oct 2026).
-- Day summary sentence is still static; improves once Calendar is wired
 - ~~Decide whether league fill earns its slots~~ — capped at 3, headline-only (Oct 2026). Revisit if the card feels thin.
 - Cleaner Worker URL via a `clintsievers.com` subdomain (deliberately deferred)
 - ~~git for the Worker~~ — **done**, source is now `worker.js` in the repo. Consider wrangler too once it outgrows one editor screen (deploy is still a manual paste into the Cloudflare editor).
+- **Bible card:** this Sunday's lectionary readings (JELC follows the lectionary), spread across the week as references only, with no text, so it sends Clint to his Bible. Not the three-year reading plan.
+- **Strategy Muse card**, behind the read key: a few lines (next milestones, hours against plan). The tracker is an Apps Script in the Strategy Muse Google account and can serve a minimal summary. The project plan is a Claude.ai artifact the Worker can't read, so it needs a copy that's refreshed whenever a workstream is fleshed out.
+- **Family calendar** in the `CAL_ICS_2` slot, waiting on sharing the family Apple calendar. Preferred over a school or community calendar.
+- **Delete the `/sitwith` SEED** in `worker.js` after Oct 21, 2026, once the archive itself covers a full week.
 
 ---
 
@@ -285,7 +323,7 @@ Warm light theme. CSS custom properties in `:root` in `index.html`.
 
 Fonts: Geist (sans), Instrument Serif (display), Geist Mono (mono), via Google Fonts.
 
-Grid: 12-column, `var(--gap)` gutters. Briefing runs 8 wide; devotion/weather/today/teams stack in a 4-column rail (the workout link is a footer line on the Today card); the long-read card spans full width as a divider; Journal, Slow Burns and On this day split the band beneath at 4 each.
+Grid: 12-column, `var(--gap)` gutters. Briefing runs 8 wide; devotion/weather/today/teams stack in a 4-column rail (the workout link is a footer line on the Today card); the long-read card spans full width as a divider, with the "Earlier this week" strip at its foot Mon–Sat, or the full-width "Last week's reads" card under it on Sundays. Below "The rest of the morning", Treasurer tasks runs 8 wide with On this day 4 wide beside it. On this day is sized to its own content (`align-self: start`), not stretched to the tasks card's height. Under 900px everything stacks to full width; under 700px the strip goes to one column.
 
 The rail should end near where the briefing does. It grows with calendar events and sports items, the briefing with story count — when adding a rail card, check both columns at 1194 wide on a full sports day, not just a quiet one.
 

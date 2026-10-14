@@ -1027,6 +1027,166 @@ const DEVOTION = (() => {
   return { handle };
 })();
 
+// ═══════════════════════════════════════════════════════════════════════
+//  /sitwith route — the archive of past "something to sit with" picks
+// ═══════════════════════════════════════════════════════════════════════
+//
+//  One top-level name — SITWITH — plus one router line below, and one call
+//  from the PUT branch (record).
+//
+//  Public, no read key: the picks aren't personal, and the computer
+//  bookmark should show them.
+//
+//  Storage: KV key "sitwith-archive" in env.BRIEFING, a JSON array of
+//  {date, day, type, headline, desc, source, read_time, url}, newest first,
+//  one entry per date, capped at CAP.
+//
+//  Why the dashboard keeps its own copy instead of reading retrieval's
+//  stored briefs: those expire after 45 days, and this Worker can't call
+//  retrieval by URL on the same account (error 1042). The service binding
+//  only runs retrieval → dashboard.
+//
+//  The PUT records BOTH the previous "latest" and the incoming one. If the
+//  archive write fails one morning, the next morning's PUT catches it up.
+// ═══════════════════════════════════════════════════════════════════════
+
+const SITWITH = (() => {
+  const KEY = 'sitwith-archive';
+  const CAP = 60;
+  const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+  // SEED: the picks from before the archive existed, copied from
+  // retrieval's /brief/<date>?json (the sit_with block sent to the
+  // dashboard). Delete after Oct 21, 2026, once the archive covers a week.
+  const SEED = [
+    { date: '2026-10-13', day: 'Tuesday', type: 'Memoir · World',
+      headline: 'I was kidnapped and held hostage for 977 days. Could I forgive my captors?',
+      desc: 'A journalist held 977 days by Somali pirates returns to one of his captors to test whether forgiveness is mercy or Stockholm syndrome — a rare, honest reckoning worth a quiet half-hour this morning.',
+      source: 'The Guardian', read_time: '~23 min',
+      url: 'https://www.theguardian.com/news/ng-interactive/2026/oct/13/i-was-kidnapped-and-held-hostage-for-977-days-could-i-forgive-my-captors' },
+    { date: '2026-10-12', day: 'Monday', type: 'Interview · World',
+      headline: 'She’s Been to Gaza. She Met With the Iranians. Now She Has a Warning.',
+      desc: "With Ukraine truces collapsing and Houthi-Saudi strikes widening, the Red Cross chief who talks to both sides explains why she fears the world's wars are spiraling; a 17-minute read for this morning.",
+      source: 'The New York Times', read_time: '~17 min',
+      url: 'https://www.nytimes.com/2026/10/10/magazine/mirjana-spoljaric-interview.html' },
+    { date: '2026-10-11', day: 'Sunday', type: 'Sunday long read · Longread · Culture',
+      headline: 'Secret Billionaires, Mafia Brides, Alpha Kings: The Insane World of Microdramas',
+      desc: "A reported tour of vertical phone soap operas, an industry that has quietly reshaped film and TV production and may soon need no human actors at all. It is a weekend read that makes this week's AI-agent headlines feel less abstract.",
+      source: 'The New York Times', read_time: '~31 min',
+      url: 'https://www.nytimes.com/2026/10/06/magazine/microdramas-tv-shows-hollywood-entertainment.html' },
+    { date: '2026-10-10', day: 'Saturday', type: 'Longread · Health',
+      headline: 'Dying Patients Are Inundated by Misinformation. My Dad Was One of Them.',
+      desc: "A reporter's account of her father's cancer and the alternative clinics that drain dying patients' savings—worth the weekend for its mix of reporting and grief.",
+      source: 'The New York Times', read_time: '~26 min',
+      url: 'https://www.nytimes.com/2026/10/04/magazine/alternative-cancer-clinics-treatment-father.html' },
+    { date: '2026-10-09', day: 'Friday', type: 'Longread · Science & Engineering',
+      headline: 'How Test Engineers Decide What Counts as Good Enough',
+      desc: "A curious, concrete tour of how engineers stage reality to decide what's safe enough, a good counterweight to a morning of AI and risk headlines.",
+      source: 'The New Yorker', read_time: '~15 min',
+      url: 'https://www.newyorker.com/magazine/2026/10/12/kobuk-the-destroyer-alex-davies-book-review' },
+    { date: '2026-10-08', day: 'Thursday', type: 'Essay · World',
+      headline: 'The Myth of Military Victory',
+      desc: "With Houthi strikes widening and US forces pulling back across the region, this Foreign Affairs analysis of why decisive military victory is so often an illusion is a timely frame for this morning's headlines.",
+      source: 'Foreign Affairs', read_time: '~17 min',
+      url: 'https://www.foreignaffairs.com/united-states/myth-military-victory' },
+  ];
+
+  // A briefing body (string or object) → one archive entry, or null when it
+  // has no pick. A failed night's briefing has no sit_with, so it never
+  // replaces a pick already recorded for that date.
+  function entryFrom(brief) {
+    if (typeof brief === 'string') {
+      try { brief = JSON.parse(brief); } catch { return null; }
+    }
+    const s = brief?.sit_with;
+    if (!s || !DATE_RE.test(brief.date || '')) return null;
+    const { type, headline, desc, source, read_time, url } = s;
+    return { date: brief.date, day: brief.day || '', type, headline, desc, source, read_time, url };
+  }
+
+  // Later lists win for the same date. Newest first.
+  function merge(...lists) {
+    const byDate = new Map();
+    for (const list of lists) for (const e of list) if (e) byDate.set(e.date, e);
+    return [...byDate.values()].sort((a, b) => b.date.localeCompare(a.date));
+  }
+
+  // { items, status }. A KV error throws; a value that isn't a JSON array
+  // comes back as status 'unreadable'.
+  async function readArchive(env) {
+    const raw = await env.BRIEFING.get(KEY);
+    if (raw === null) return { items: [], status: 'ok' };
+    try {
+      const items = JSON.parse(raw);
+      if (Array.isArray(items)) return { items, status: 'ok' };
+    } catch {}
+    return { items: [], status: 'unreadable' };
+  }
+
+  // Called by the PUT after "latest" is written. Throws on failure; the
+  // caller turns that into the X-Sitwith-Archive header. An unreadable
+  // archive is left alone rather than overwritten, so it can be inspected.
+  async function record(env, briefs) {
+    const incoming = briefs.map(entryFrom).filter(Boolean);
+    if (!incoming.length) return;
+    const { items, status } = await readArchive(env);
+    if (status !== 'ok') throw new Error(`archive ${status}, not overwritten`);
+    await env.BRIEFING.put(KEY, JSON.stringify(merge(items, incoming).slice(0, CAP)));
+  }
+
+  async function handle(request, env) {
+    const cors = {
+      'access-control-allow-origin': '*',
+      'access-control-allow-methods': 'GET, OPTIONS',
+      'content-type': 'application/json; charset=utf-8',
+      'cache-control': 'no-store',
+    };
+    if (request.method === 'OPTIONS') return new Response(null, { headers: cors });
+    if (request.method !== 'GET') {
+      return new Response(JSON.stringify({ error: 'GET only' }), { status: 405, headers: cors });
+    }
+
+    // Same lesson as the other routes: a broken archive and a quiet week
+    // must not produce the same JSON.
+    const sources = {};
+    let archived = [];
+    try {
+      const a = await readArchive(env);
+      archived = a.items;
+      sources.archive = a.status === 'ok' ? `ok (${a.items.length})` : a.status;
+    } catch (e) {
+      sources.archive = `error: ${e.message}`;
+    }
+
+    let current = null;
+    try {
+      current = entryFrom(await env.BRIEFING.get('latest'));
+      sources.latest = current ? 'ok' : 'no pick';
+    } catch (e) {
+      sources.latest = `error: ${e.message}`;
+    }
+
+    // Lowest to highest precedence, so items[0] is the pick in the hero card.
+    let items = merge(SEED, archived, [current]);
+
+    // ?days=N keeps picks dated within the last N days (Chicago), today included.
+    const days = parseInt(new URL(request.url).searchParams.get('days') || '', 10);
+    if (days > 0) {
+      const today = new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'America/Chicago', year: 'numeric', month: '2-digit', day: '2-digit',
+      }).format(Date.now());
+      const t = Date.UTC(+today.slice(0, 4), +today.slice(5, 7) - 1, +today.slice(8, 10));
+      const from = new Date(t - (days - 1) * 86400000).toISOString().slice(0, 10);
+      items = items.filter(e => e.date >= from);
+    }
+
+    return new Response(JSON.stringify({ items, sources, generated: new Date().toISOString() }),
+      { headers: cors });
+  }
+
+  return { record, handle };
+})();
+
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
@@ -1034,6 +1194,7 @@ export default {
     if (url.pathname === '/calendar') return CALENDAR.handle(request, env);
     if (url.pathname === '/tasks') return TASKS.handle(request, env);
     if (url.pathname === '/devotion') return DEVOTION.handle(request);
+    if (url.pathname === '/sitwith') return SITWITH.handle(request, env);
 
     const cors = {
       "Access-Control-Allow-Origin": "*",
@@ -1059,8 +1220,19 @@ export default {
       }
       const body = await request.text();
       try { JSON.parse(body); } catch { return new Response("Invalid JSON", { status: 400, headers: cors }); }
+
+      // The archive must never fail the briefing write, so every step of it
+      // is guarded and its outcome only reported, in X-Sitwith-Archive.
+      let previous = null, archive = "ok";
+      try { previous = await env.BRIEFING.get("latest"); }
+      catch (e) { archive = `error: previous latest unreadable: ${e.message}`; }
+
       await env.BRIEFING.put("latest", body);
-      return new Response("OK", { headers: cors });
+
+      try { await SITWITH.record(env, [previous, body]); }
+      catch (e) { archive = `error: ${e.message}`; }
+
+      return new Response("OK", { headers: { ...cors, "X-Sitwith-Archive": archive } });
     }
 
     return new Response("Method not allowed", { status: 405, headers: cors });

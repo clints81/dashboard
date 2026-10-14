@@ -100,19 +100,6 @@
     }
     .topbar-time span { font-size: 13px; color: var(--ink-4); margin-left: 2px; }
 
-    /* Summary sentence */
-    .day-summary {
-      font-size: 14px;
-      color: var(--ink-3);
-      margin-bottom: 22px;
-      line-height: 1.6;
-      padding: 12px var(--pad);
-      background: var(--bg-2);
-      border-radius: var(--r-md);
-      border-left: 3px solid var(--accent);
-    }
-    .day-summary strong { color: var(--ink-2); font-weight: 500; }
-
     /* Grid */
     .grid {
       display: grid;
@@ -497,35 +484,6 @@
       vertical-align: middle;
     }
 
-    /* ── JOURNAL ── */
-    .journal-prompt {
-      font-family: var(--serif);
-      font-size: 16px;
-      font-style: italic;
-      color: var(--ink-2);
-      line-height: 1.55;
-      margin-bottom: 14px;
-    }
-    .journal-streak {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      margin-bottom: 12px;
-    }
-    .journal-streak-num {
-      font-family: var(--mono);
-      font-size: 18px;
-      font-weight: 600;
-      color: var(--accent);
-    }
-    .journal-streak-label { font-size: 11px; color: var(--ink-4); }
-    .journal-window {
-      font-size: 11px;
-      color: var(--ink-4);
-      margin-top: 8px;
-    }
-    .journal-window .closes { color: var(--warn); font-weight: 600; }
-
     /* ── WORKOUT — a footer line on the Today card ── */
     .cal-footer {
       border-top: 1px solid var(--line);
@@ -551,6 +509,8 @@
       color: var(--ink-4);
     }
     /* ── ON THIS DAY ── */
+    /* Sized to its own content beside the tasks card, not stretched to it. */
+    .otd-card { align-self: start; }
     .otd-items { display: flex; flex-direction: column; gap: 0; }
     .otd-item {
       padding: 8px 0;
@@ -569,35 +529,12 @@
       flex-shrink: 0;
       padding-top: 1px;
     }
-
-    /* ── SLOW BURNS ── */
-    .burn-items { display: flex; flex-direction: column; gap: 0; }
-    .burn-item {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      padding: 9px 0;
-      border-bottom: 1px solid var(--line);
-    }
-    .burn-item:last-child { border-bottom: none; }
-    .burn-name { font-size: 13px; color: var(--ink-2); flex: 1; }
-    .burn-age {
-      font-size: 10px;
-      font-family: var(--mono);
-      color: var(--ink-4);
-    }
-    .burn-age.overdue { color: var(--neg); }
-    .burn-bar {
-      height: 3px;
-      width: 40px;
-      background: var(--bg-3);
-      border-radius: 99px;
+    .otd-text {
+      display: -webkit-box;
+      -webkit-box-orient: vertical;
+      -webkit-line-clamp: 3;
+      line-clamp: 3;
       overflow: hidden;
-    }
-    .burn-fill {
-      height: 100%;
-      border-radius: 99px;
-      background: var(--accent);
     }
 
     /* ── LOADING / ERROR states ── */
@@ -652,9 +589,6 @@
     }
     .rail > .card { grid-column: auto; }
 
-    /* Missing span — the journal card asked for this and never got it */
-    .col-3 { grid-column: span 3; }
-
     /* ── Briefing at reading size ── */
     .briefing-summary { font-size: 19px; line-height: 1.6; }
     .headline-item { padding: 12px 0; align-items: flex-start; }
@@ -691,6 +625,95 @@
     }
     .sit-hero .sit-cta:hover { background: oklch(0.30 0.03 35); }
 
+    /* Earlier this week — Mon–Sat, at the foot of the sit-with card.
+       Two columns reading down the left, then the right (--rows is set
+       from the item count). */
+    .sit-past {
+      margin-top: 16px;
+      padding-top: 12px;
+      border-top: 1px solid oklch(0.30 0.025 35);
+    }
+    .sit-past-label {
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: oklch(0.65 0.08 35);
+      margin-bottom: 6px;
+    }
+    .sit-past-list {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      grid-template-rows: repeat(var(--rows, 3), auto);
+      grid-auto-flow: column;
+      column-gap: 32px;
+    }
+    .sit-past-row {
+      display: flex;
+      align-items: baseline;
+      gap: 10px;
+      min-width: 0;
+      padding: 5px 0;
+      text-decoration: none;
+      font-size: 12.5px;
+    }
+    .sit-past-day {
+      font-family: var(--mono);
+      font-size: 10px;
+      letter-spacing: 0.04em;
+      color: oklch(0.50 0.015 70);
+      flex-shrink: 0;
+      width: 28px;
+    }
+    .sit-past-head {
+      flex: 1;
+      min-width: 0;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      color: oklch(0.85 0.012 75);
+    }
+    .sit-past-row:hover .sit-past-head { color: var(--accent); }
+    .sit-past-src {
+      flex-shrink: 0;
+      max-width: 34%;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      font-size: 11px;
+      color: oklch(0.50 0.015 70);
+    }
+    .sit-past-note { font-size: 12px; color: oklch(0.60 0.015 70); font-style: italic; }
+
+    /* Last week's reads — Sundays only, full width under the sit-with card */
+    .week-card { grid-column: span 12; }
+    .week-list {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+      gap: 18px 24px;
+    }
+    .week-item { display: block; text-decoration: none; color: inherit; }
+    .week-kicker {
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--ink-4);
+      margin-bottom: 4px;
+    }
+    .week-kicker b { color: var(--accent); font-weight: 600; }
+    .week-head {
+      font-family: var(--serif);
+      font-size: 19px;
+      line-height: 1.25;
+      color: var(--ink);
+      margin-bottom: 6px;
+    }
+    .week-item:hover .week-head { color: var(--accent); }
+    .week-desc { font-size: 12.5px; line-height: 1.55; color: var(--ink-3); margin-bottom: 6px; }
+    .week-meta { font-size: 10.5px; color: var(--ink-4); letter-spacing: 0.04em; }
+    .week-note { font-size: 12.5px; color: var(--ink-3); font-style: italic; }
+
     /* ── Divider between the reading half and the glance half ── */
     .band {
       grid-column: span 12;
@@ -717,9 +740,12 @@
       .rail > .card { flex: 1; }
     }
     @media (max-width: 900px) {
-      .col-3, .col-4, .col-5, .col-6, .col-7, .col-8 { grid-column: span 12; }
+      .col-4, .col-5, .col-6, .col-7, .col-8 { grid-column: span 12; }
       .rail { flex-direction: column; }
       .sit-hero .sit-inner { flex-direction: column; align-items: flex-start; gap: 18px; }
+    }
+    @media (max-width: 700px) {
+      .sit-past-list { grid-template-columns: 1fr; grid-template-rows: none; grid-auto-flow: row; }
     }
     @media (max-width: 600px) {
       .shell { padding: 16px 14px 30px; }
@@ -742,11 +768,6 @@
       <div class="topbar-greeting">Good morning, <em>Clint</em>.</div>
     </div>
     <div class="topbar-time" id="topbar-time">—<span>CT</span></div>
-  </div>
-
-  <!-- Day summary -->
-  <div class="day-summary" id="day-summary">
-    Loading your day…
   </div>
 
   <!-- Grid -->
@@ -821,12 +842,23 @@
         </div>
         <a href="#" class="sit-cta" id="sit-link" target="_blank" rel="noopener">Read it</a>
       </div>
+      <!-- Mon–Sat: the six days before the hero's pick (app.js) -->
+      <div class="sit-past" id="sit-past" hidden></div>
+    </div>
+
+    <!-- ── LAST WEEK'S READS — Sundays only ── -->
+    <div class="card week-card" id="week-card" hidden>
+      <div class="card-label">
+        Last week's reads
+        <span class="card-label-badge" id="week-badge">—</span>
+      </div>
+      <div id="week-content"></div>
     </div>
 
     <div class="band">The rest of the morning</div>
 
-    <!-- ── TREASURER TASKS (col 12) ── -->
-    <div class="card col-12">
+    <!-- ── TREASURER TASKS (col 8) ── -->
+    <div class="card col-8">
       <div class="card-label">
         Treasurer tasks
         <span class="card-label-badge" id="tasks-badge">—</span>
@@ -836,28 +868,8 @@
       </div>
     </div>
 
-    <!-- ── JOURNAL ── -->
-    <div class="card col-4">
-      <div class="card-label">Journal nudge</div>
-      <div class="journal-streak">
-        <div class="journal-streak-num" id="journal-streak">—</div>
-        <div class="journal-streak-label">day streak</div>
-      </div>
-      <div class="journal-prompt" id="journal-prompt">—</div>
-      <div class="journal-window" id="journal-window"></div>
-    </div>
-
-    <!-- ── SLOW BURNS ── -->
-    <div class="card col-4">
-      <div class="card-label">
-        Slow burns
-        <span class="card-label-badge">Back burner</span>
-      </div>
-      <div class="burn-items" id="burn-content"></div>
-    </div>
-
-    <!-- ── ON THIS DAY ── -->
-    <div class="card col-4">
+    <!-- ── ON THIS DAY (col 4) ── -->
+    <div class="card col-4 otd-card">
       <div class="card-label">On this day</div>
       <div class="otd-items" id="otd-content"></div>
     </div>

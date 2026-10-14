@@ -34,6 +34,25 @@ function todaySeed() {
   return d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate();
 }
 
+// Today as YYYY-MM-DD in Chicago. toISOString() is UTC, which rolls over to
+// tomorrow at 7pm Central (6pm in winter).
+function chicagoDate(d = new Date()) {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: CONFIG.location?.timezone || 'America/Chicago',
+    year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(d);
+}
+
+// Date-string arithmetic, anchored at UTC noon so no zone can shift the day.
+const dateAtNoon = ymd => new Date(ymd + 'T12:00:00Z');
+function shiftDate(ymd, days) {
+  const d = dateAtNoon(ymd);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+const weekdayOf = (ymd, style = 'long') =>
+  dateAtNoon(ymd).toLocaleDateString('en-US', { weekday: style, timeZone: 'UTC' });
+
 // ── Network helper ─────────────────────────────────────────────────────
 // Every live card goes through this. One retry after a short pause, because
 // the most common failure is a fetch firing before wifi is actually up
@@ -43,6 +62,15 @@ function todaySeed() {
 function escapeHTML(s) {
   return String(s ?? '').replace(/[&<>"']/g, c =>
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+// Some upstream text arrives entity-encoded (&#39;). Decode it to plain text
+// first, then escape it for wherever it goes. A textarea parses entities
+// without running or rendering anything.
+const entityBox = document.createElement('textarea');
+function decodeEntities(s) {
+  entityBox.innerHTML = String(s ?? '');
+  return entityBox.value;
 }
 
 // A failed status is thrown with `.status` on the error, so callers can tell
@@ -152,17 +180,6 @@ function initClock() {
   };
   tick();
   setInterval(tick, 1000);
-}
-
-// ── Day Summary ────────────────────────────────────────────────────────
-
-function renderDaySummary() {
-  const el = $('day-summary');
-  if (!el) return;
-  const now = new Date();
-  const hour = now.getHours();
-  const greeting = hour < 9 ? "Early start today." : hour < 12 ? "Morning." : "";
-  el.innerHTML = `${greeting} The goal before noon is <strong>one outreach</strong>.`;
 }
 
 // ── Weather ────────────────────────────────────────────────────────────
@@ -319,82 +336,6 @@ async function loadSports() {
   }
 }
 
-// ── Journal ────────────────────────────────────────────────────────────
-
-function renderJournal() {
-  const promptEl = $('journal-prompt');
-  const streakEl = $('journal-streak');
-  const windowEl = $('journal-window');
-  if (!promptEl) return;
-
-  const { journalPrompts, journalStreak, journalWindowCloses } = CONFIG;
-
-  // Pick prompt by day of year (consistent across sessions)
-  const doy = Math.floor((new Date() - new Date(new Date().getFullYear(), 0, 0)) / 86400000);
-  const prompt = journalPrompts[doy % journalPrompts.length];
-
-  if (promptEl) promptEl.textContent = `"${prompt}"`;
-  if (streakEl) streakEl.textContent = journalStreak;
-
-  // Window closes message
-  if (windowEl) {
-    const [hh, mm] = journalWindowCloses.split(':').map(Number);
-    const now = new Date();
-    const closes = new Date();
-    closes.setHours(hh, mm, 0, 0);
-    const minsLeft = Math.round((closes - now) / 60000);
-
-    if (minsLeft > 0 && minsLeft < 120) {
-      windowEl.innerHTML = `Window closes in <span class="closes">${minsLeft} min</span>. Three sentences.`;
-    } else if (minsLeft <= 0) {
-      windowEl.textContent = 'Journal window closed. Pick it up tomorrow.';
-    } else {
-      windowEl.innerHTML = `Window closes at <span class="closes">${journalWindowCloses.replace(':','h').replace(/^0/,'')}</span>. Three sentences.`;
-    }
-  }
-}
-
-// ── Something to Sit With ──────────────────────────────────────────────
-
-function renderSitWith() {
-  const { sitWith } = CONFIG;
-  const typeEl = $('sit-type');
-  const headlineEl = $('sit-headline');
-  const descEl = $('sit-desc');
-  const metaEl = $('sit-meta');
-  const linkEl = $('sit-link');
-
-  if (typeEl) typeEl.textContent = sitWith.type;
-  if (headlineEl) headlineEl.textContent = sitWith.headline;
-  if (descEl) descEl.textContent = sitWith.desc;
-  if (metaEl) metaEl.textContent = `${sitWith.source} · ${sitWith.readTime}`;
-  if (linkEl) { linkEl.href = sitWith.url; linkEl.textContent = 'Read it'; }
-}
-
-// ── Slow Burns ─────────────────────────────────────────────────────────
-
-function renderSlowBurns() {
-  const el = $('burn-content');
-  if (!el) return;
-
-  const { slowBurns, slowBurnOverdue } = CONFIG;
-
-  // Sort: most overdue first
-  const sorted = [...slowBurns].sort((a, b) => b.lastTouched - a.lastTouched);
-
-  el.innerHTML = sorted.map(b => {
-    const isOverdue = b.lastTouched >= slowBurnOverdue;
-    const pct = Math.min(100, Math.round((b.lastTouched / (slowBurnOverdue * 2)) * 100));
-    return `
-      <div class="burn-item">
-        <div class="burn-name">${b.name}</div>
-        <div class="burn-bar"><div class="burn-fill" style="width:${pct}%"></div></div>
-        <div class="burn-age ${isOverdue ? 'overdue' : ''}">${b.lastTouched}d</div>
-      </div>
-    `;
-  }).join('');
-}
-
 // ── On This Day ────────────────────────────────────────────────────────
 // Uses Wikipedia's "On this day" API
 
@@ -412,15 +353,15 @@ async function loadOnThisDay() {
     const d = await res.json();
     const events = d.events || [];
 
-    // Pick 4 interesting events using seeded random
+    // Pick 3 events using seeded random; each is clamped to 3 lines in CSS
     const rng = seededRandom(todaySeed());
     const shuffled = [...events].sort(() => rng() - 0.5);
-    const picks = shuffled.slice(0, 4);
+    const picks = shuffled.slice(0, 3);
 
     el.innerHTML = picks.map(e => `
       <div class="otd-item">
-        <span class="otd-year">${e.year}</span>
-        <span>${e.text}</span>
+        <span class="otd-year">${escapeHTML(e.year)}</span>
+        <span class="otd-text">${escapeHTML(e.text)}</span>
       </div>
     `).join('');
   } catch {
@@ -680,8 +621,7 @@ async function loadBriefing() {
     const res = await fetchRetry(`${BRIEFING_URL}?t=${Date.now()}`);
 
     const briefing = await res.json();
-    const today = new Date().toISOString().split('T')[0];
-    const isToday = briefing.date === today;
+    const isToday = briefing.date === chicagoDate();
 
     // ── Synthesis ──
     if (synthesisEl) {
@@ -708,10 +648,10 @@ async function loadBriefing() {
     // ── Something to sit with ──
     const s = briefing.sit_with;
     if (s) {
-      if (sitTypeEl)  sitTypeEl.textContent  = s.type;
-      if (sitHeadEl)  sitHeadEl.textContent  = s.headline;
-      if (sitDescEl)  sitDescEl.textContent  = s.desc;
-      if (sitMetaEl)  sitMetaEl.textContent  = `${s.source} · ${s.read_time}`;
+      if (sitTypeEl)  sitTypeEl.textContent  = decodeEntities(s.type);
+      if (sitHeadEl)  sitHeadEl.textContent  = decodeEntities(s.headline);
+      if (sitDescEl)  sitDescEl.textContent  = decodeEntities(s.desc);
+      if (sitMetaEl)  sitMetaEl.textContent  = decodeEntities(`${s.source} · ${s.read_time}`);
       if (sitLinkEl)  { sitLinkEl.href = s.url; sitLinkEl.textContent = 'Read it'; }
     }
 
@@ -735,13 +675,108 @@ async function loadBriefing() {
   }
 }
 
+// ── Sit-with archive ───────────────────────────────────────────────────
+// Worker /sitwith route: past picks, newest first, items[0] being the one
+// in the hero card. Public, no key. Mon–Sat it fills the "Earlier this
+// week" strip at the foot of the sit-with card; on Sunday it fills the
+// "Last week's reads" card instead.
+//
+// A broken archive says so ("Archive unavailable") rather than hiding the
+// strip, so it can't pass for a quiet week.
+
+const SITWITH_URL = 'https://briefing.clintsievers.workers.dev/sitwith';
+
+async function loadSitArchive() {
+  let data = null;
+  try {
+    const res = await fetchRetry(`${SITWITH_URL}?days=14&t=${Date.now()}`);
+    data = await res.json();
+  } catch {}
+  renderSitArchive(data, chicagoDate());
+}
+
+const plain = s => escapeHTML(decodeEntities(s));
+const safeHref = u => /^https?:\/\//i.test(u || '') ? escapeHTML(u) : '#';
+
+// `data` is the /sitwith JSON, or null when the fetch failed. `today` is a
+// Chicago YYYY-MM-DD, passed in so a Sunday can be checked on any day.
+function renderSitArchive(data, today) {
+  const strip = $('sit-past');
+  const card  = $('week-card');
+  if (!strip || !card) return;
+
+  const ok = (data?.sources?.archive || '').startsWith('ok');
+  const items = ok ? (data.items || []) : [];
+  const sunday = dateAtNoon(today).getUTCDay() === 0;
+
+  strip.hidden = sunday;
+  card.hidden = !sunday;
+  return sunday ? renderLastWeek(ok, items, today) : renderEarlier(ok, items, today, data);
+}
+
+// Mon–Sat: the six days before the hero's pick, newest first, two columns.
+function renderEarlier(ok, items, today, data) {
+  const strip = $('sit-past');
+  const label = `<div class="sit-past-label">Earlier this week</div>`;
+  if (!ok) {
+    strip.innerHTML = `${label}<div class="sit-past-note">Archive unavailable</div>`;
+    return;
+  }
+
+  // items[0] is the hero's pick. With no pick this morning the hero shows
+  // its placeholder, so count back from today instead.
+  const heroDate = data.sources.latest === 'ok' && items[0] ? items[0].date : today;
+  const from = shiftDate(heroDate, -6);
+  const earlier = items.filter(e => e.date >= from && e.date < heroDate);
+
+  if (!earlier.length) { strip.hidden = true; return; }
+
+  strip.innerHTML = `${label}
+    <div class="sit-past-list" style="--rows:${Math.ceil(earlier.length / 2)}">
+      ${earlier.map(e => `
+        <a class="sit-past-row" href="${safeHref(e.url)}" target="_blank" rel="noopener">
+          <span class="sit-past-day">${weekdayOf(e.date, 'short')}</span>
+          <span class="sit-past-head">${plain(e.headline)}</span>
+          <span class="sit-past-src">${plain(e.source)}</span>
+        </a>`).join('')}
+    </div>`;
+}
+
+// Sunday: the seven days before today, Sunday through Saturday.
+function renderLastWeek(ok, items, today) {
+  const el = $('week-content');
+  const badge = $('week-badge');
+  if (!ok) {
+    badge.textContent = '—';
+    el.innerHTML = `<div class="error">Archive unavailable</div>`;
+    return;
+  }
+
+  const from = shiftDate(today, -7);
+  const week = items.filter(e => e.date >= from && e.date < today)
+    .sort((a, b) => a.date.localeCompare(b.date));
+
+  badge.textContent = `${week.length} ${week.length === 1 ? 'piece' : 'pieces'}`;
+  if (!week.length) {
+    el.innerHTML = `<div class="week-note">No picks recorded last week.</div>`;
+    return;
+  }
+
+  el.innerHTML = `<div class="week-list">
+    ${week.map(e => `
+      <a class="week-item" href="${safeHref(e.url)}" target="_blank" rel="noopener">
+        <div class="week-kicker"><b>${weekdayOf(e.date)}</b> · ${plain(e.type)}</div>
+        <div class="week-head">${plain(e.headline)}</div>
+        <div class="week-desc">${plain(e.desc)}</div>
+        <div class="week-meta">${plain(e.source)} · ${plain(e.read_time)}</div>
+      </a>`).join('')}
+  </div>`;
+}
+
 // ── Init ───────────────────────────────────────────────────────────────
 
-// Cards that render instantly from config or the clock.
+// Cards that render instantly from config.
 function renderStatic() {
-  renderDaySummary();
-  renderJournal();
-  renderSlowBurns();
   renderWorkout();
 }
 
@@ -754,6 +789,7 @@ function loadLiveData() {
   loadDevotion();
   loadOnThisDay();
   loadBriefing(); // handles both briefing and sit-with
+  loadSitArchive();
 }
 
 function init() {
@@ -773,7 +809,7 @@ const REFRESH_COOLDOWN = 60 * 1000; // don't re-pull on quick app switches
 
 function refresh() {
   lastRefresh = Date.now();
-  renderStatic();  // time-sensitive text (journal window, greeting)
+  renderStatic();
   loadLiveData();
 }
 
