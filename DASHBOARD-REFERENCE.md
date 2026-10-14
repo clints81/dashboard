@@ -8,13 +8,17 @@ A personal morning dashboard for Clint Sievers, hosted on GitHub Pages. Plain HT
 **Live URL:** `https://clints81.github.io/dashboard`
 **Repository:** `github.com/clints81/dashboard`
 **Worker:** `briefing.clintsievers.workers.dev` (deployed separately by pasting into the Cloudflare editor — but its source now lives in the repo as `worker.js`)
+**Briefing Worker:** `briefing-retrieval.clintsievers.workers.dev` (source in `briefing-retrieval/`, deployed with `npm run deploy` from that folder)
 
 Repo files:
 - `index.html` — structure and design (edit rarely)
 - `config.js` — personal data layer (edit regularly, no coding required)
 - `app.js` — runtime logic and data fetching (edit for feature changes)
 - `worker.js` — the Cloudflare Worker source (edit, commit, then paste into the Cloudflare editor and deploy)
+- `briefing-retrieval/` — the Worker that writes the briefing overnight; its own `README.md` and `DESIGN.md` (see The briefing system)
 - `DASHBOARD-REFERENCE.md` — this file
+
+Everything in this repo is public and served by GitHub Pages. Secrets live in Cloudflare and 1Password, never here.
 
 ---
 
@@ -180,7 +184,7 @@ If the WELS template ever changes and the verse stops parsing, `sources.wels` re
 
 ## The briefing system
 
-Since 2026-10-08 the briefing is written by a separate Cloudflare Worker, **`briefing-retrieval`** (repo `clints81/morning-briefing-retrieval`; the reasoning behind it is in that repo's `DESIGN.md`). It replaced the Cowork briefing and deep-dive tasks, which had stopped running reliably.
+Since 2026-10-08 the briefing is written by a separate Cloudflare Worker, **`briefing-retrieval`** (source in `briefing-retrieval/` in this repo, moved here 2026-10-14 from `clints81/morning-briefing-retrieval`; the reasoning behind it is in `briefing-retrieval/DESIGN.md`). It replaced the Cowork briefing and deep-dive tasks, which had stopped running reliably.
 
 Each night, Central time:
 1. From 1am (midnight in winter), it builds a candidate pool from feeds and APIs: NYT, WSJ, Guardian, BBC, NPR, Politico and Ars Technica for news; long-form outlets for the sit-with pick.

@@ -1,4 +1,4 @@
-# morning-briefing-retrieval
+# briefing-retrieval
 
 The morning briefing, rebuilt as a scheduled Cloudflare Worker
 (`briefing-retrieval.clintsievers.workers.dev`). Phase 1 pulls news from
@@ -7,9 +7,12 @@ the pools and the story log to the Claude API, verifies what comes back,
 and publishes the briefing to the dashboard. Why things are built this
 way: [DESIGN.md](DESIGN.md).
 
-It is separate from the dashboard Worker (`briefing.clintsievers.workers.dev`,
-source in `clints81/dashboard/worker.js`) and uses its own KV namespace
-(`briefing-pool`, not `briefing-store`). Nothing here can break the dashboard.
+It lives in the dashboard repo but runs separately from the dashboard
+Worker (`briefing.clintsievers.workers.dev`, source in `../worker.js`) and
+uses its own KV namespace (`briefing-pool`, not `briefing-store`). Nothing
+here can break the dashboard. Run the npm commands below from this folder.
+Until 2026-10-14 this was its own repo, `clints81/morning-briefing-retrieval`
+(now archived); the history came with it.
 
 ## Pools
 
