@@ -45,20 +45,96 @@ function escapeHTML(s) {
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
-async function fetchRetry(url, tries = 2, delayMs = 2500) {
+// A failed status is thrown with `.status` on the error, so callers can tell
+// "locked" (401) from "broken" (anything else).
+async function fetchRetry(url, { headers, tries = 2, delayMs = 2500 } = {}) {
   let lastErr;
   for (let i = 0; i < tries; i++) {
     try {
-      const res = await fetch(url);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const res = await fetch(url, headers ? { headers } : undefined);
+      if (!res.ok) {
+        const err = new Error(`HTTP ${res.status}`);
+        err.status = res.status;
+        throw err;
+      }
       return res;
     } catch (e) {
       lastErr = e;
+      // A 401 is an answer, not a blip: asking again in 2.5s with the same
+      // key gets the same answer.
+      if (e.status === 401) break;
       if (i < tries - 1) await new Promise(r => setTimeout(r, delayMs));
     }
   }
   throw lastErr;
 }
+
+// ── Read key ───────────────────────────────────────────────────────────
+// /calendar and /tasks need X-Read-Key. The key is entered once per device
+// and kept in this browser's storage, never in the repo or this file.
+// Storage can throw (private mode, blocked site data), so every access is
+// guarded, and a key saved while storage is unavailable still works until
+// the page closes.
+
+const READ_KEY_STORE = 'dashReadKey';
+let readKeyFallback = '';
+
+function getReadKey() {
+  try { return localStorage.getItem(READ_KEY_STORE) || readKeyFallback; }
+  catch { return readKeyFallback; }
+}
+
+function setReadKey(key) {
+  readKeyFallback = key;
+  try { localStorage.setItem(READ_KEY_STORE, key); } catch {}
+}
+
+// One compact line in place of the card's content. `rejected` = a key is
+// stored and the Worker said 401; otherwise there's no key on this device.
+function renderLocked(el, badge, rejected) {
+  if (badge) badge.textContent = '—';
+  el.innerHTML = `
+    <div class="lock-line">
+      ${rejected ? 'Key rejected' : 'Locked on this device'} ·
+      <button type="button" class="lock-open">${rejected ? 'Re-enter key' : 'Enter key'}</button>
+    </div>`;
+  el.querySelector('.lock-open').addEventListener('click', () => openKeyField(el));
+}
+
+function openKeyField(el) {
+  el.innerHTML = `
+    <form class="lock-form">
+      <input type="password" class="lock-input" placeholder="Read key" aria-label="Read key"
+             autocomplete="off" autocapitalize="off" spellcheck="false">
+      <button type="submit" class="lock-save">Save</button>
+    </form>`;
+  const form = el.querySelector('.lock-form');
+  const input = form.querySelector('.lock-input');
+  input.focus();
+  form.addEventListener('submit', e => {
+    e.preventDefault();
+    const key = input.value.trim();
+    if (!key) return;
+    setReadKey(key);
+    reloadProtected();
+  });
+}
+
+// Only the key-protected cards. Clearing both first also closes a key field
+// left open on the other card.
+function reloadProtected() {
+  for (const id of ['cal-content', 'tasks-content']) {
+    const el = $(id);
+    if (el) el.innerHTML = `<div class="loading">Loading…</div>`;
+  }
+  loadCalendar();
+  loadTasks();
+}
+
+// The iPad refreshes on returning to the foreground. Leaving to copy the key
+// from 1Password counts as that, so an open key field is left alone rather
+// than wiped mid-entry.
+const keyFieldOpen = el => !!el.querySelector('.lock-form');
 
 // ── Clock & Date ───────────────────────────────────────────────────────
 
@@ -382,12 +458,14 @@ function locationHTML(loc) {
 async function loadCalendar() {
   const el = $('cal-content');
   const badge = $('cal-badge');
-  if (!el) return;
+  if (!el || keyFieldOpen(el)) return;
 
   const url = CONFIG.calendar?.url || 'https://briefing.clintsievers.workers.dev/calendar';
+  const key = getReadKey();
+  if (!key) return renderLocked(el, badge, false);
 
   try {
-    const res = await fetchRetry(url);
+    const res = await fetchRetry(url, { headers: { 'X-Read-Key': key } });
     const data = await res.json();
     const events = data.events || [];
 
@@ -425,6 +503,7 @@ async function loadCalendar() {
     }).join('');
 
   } catch (e) {
+    if (e.status === 401) return renderLocked(el, badge, true);
     // An error state has to be visually distinct from an empty day, or a
     // failed fetch reads as a free morning.
     el.innerHTML = `<div class="error">Calendar unavailable</div>`;
@@ -449,12 +528,14 @@ function tasksDueLabel(t) {
 async function loadTasks() {
   const el = $('tasks-content');
   const badge = $('tasks-badge');
-  if (!el) return;
+  if (!el || keyFieldOpen(el)) return;
 
   const url = CONFIG.tasks?.url || 'https://briefing.clintsievers.workers.dev/tasks';
+  const key = getReadKey();
+  if (!key) return renderLocked(el, badge, false);
 
   try {
-    const res = await fetchRetry(`${url}?t=${Date.now()}`);
+    const res = await fetchRetry(`${url}?t=${Date.now()}`, { headers: { 'X-Read-Key': key } });
     const data = await res.json();
 
     // A non-ok sources block means the token expired or the integration lost
@@ -510,6 +591,10 @@ async function loadTasks() {
       </div>`;
 
   } catch (e) {
+    // A 401 throws out of fetchRetry before the body is read, so it lands
+    // here and never reaches the sources.notion check above — which would
+    // call it "unavailable", since a locked reply has no notion entry.
+    if (e.status === 401) return renderLocked(el, badge, true);
     // Distinct from an empty week — a failed fetch must not read as "clear".
     el.innerHTML = `<div class="error">Tasks unavailable</div>`;
     if (badge) badge.textContent = '—';

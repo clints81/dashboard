@@ -251,6 +251,49 @@ export async function handleSports(request, ctx) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════
+//  Read key — shared by /calendar and /tasks
+// ═══════════════════════════════════════════════════════════════════════
+//
+//  READ_KEY is a Secret (Settings → Variables and Secrets). The page sends
+//  it as X-Read-Key; each device enters it once and keeps it in browser
+//  storage, so it never sits in the public JS. Every other route is public.
+//
+//  Order inside a protected route: OPTIONS first (preflights never carry
+//  the key), then check(), then the method check and the cache. Checking
+//  before the cache lookup is the point — a request without the key must
+//  never be handed a cached copy.
+// ═══════════════════════════════════════════════════════════════════════
+
+const READ_GATE = (() => {
+  // Returns the refusal to send, or null when the request may read. The
+  // refusal carries the route's CORS headers: without them the browser hides
+  // the 401 and "locked" looks like a network failure.
+  function check(request, env, cors) {
+    const deny = (status, auth) => new Response(
+      JSON.stringify({ error: 'locked', sources: { auth } }),
+      { status, headers: { ...cors, 'cache-control': 'no-store' } });
+
+    if (!env.READ_KEY) return deny(500, 'READ_KEY unset');   // fail closed
+    const sent = request.headers.get('X-Read-Key');
+    if (!sent) return deny(401, 'missing');
+    if (sent !== env.READ_KEY) return deny(401, 'rejected');
+    return null;
+  }
+
+  // The copy in caches.default keeps `public, max-age` on purpose: cache.put
+  // refuses (413) a response whose Cache-Control says not to store it, and
+  // Cloudflare reads both `private` and `no-store` that way. So the cache
+  // gets the public copy and the browser gets this one.
+  function forBrowser(res) {
+    const out = new Response(res.body, res);
+    out.headers.set('cache-control', 'private, no-store');
+    return out;
+  }
+
+  return { check, forBrowser };
+})();
+
+// ═══════════════════════════════════════════════════════════════════════
 //  /calendar route — drop-in block for briefing.clintsievers.workers.dev
 // ═══════════════════════════════════════════════════════════════════════
 //
@@ -616,10 +659,13 @@ const CALENDAR = (() => {
     const cors = {
       'access-control-allow-origin': '*',
       'access-control-allow-methods': 'GET, OPTIONS',
+      'access-control-allow-headers': 'X-Read-Key',
       'content-type': 'application/json; charset=utf-8',
     };
 
     if (request.method === 'OPTIONS') return new Response(null, { headers: cors });
+    const locked = READ_GATE.check(request, env, cors);
+    if (locked) return locked;
     if (request.method !== 'GET') {
       return new Response(JSON.stringify({ error: 'GET only' }), { status: 405, headers: cors });
     }
@@ -628,7 +674,7 @@ const CALENDAR = (() => {
     const cache = caches.default;
     const cacheKey = new Request(new URL(request.url).toString(), { method: 'GET' });
     const hit = await cache.match(cacheKey);
-    if (hit) return hit;
+    if (hit) return READ_GATE.forBrowser(hit);
 
     // ?date=YYYY-MM-DD points the route at another day. For checking that
     // parsing works without waiting for a morning to arrive.
@@ -640,7 +686,7 @@ const CALENDAR = (() => {
       headers: { ...cors, 'cache-control': `public, max-age=${CACHE_SECONDS}` },
     });
     await cache.put(cacheKey, res.clone());
-    return res;
+    return READ_GATE.forBrowser(res);
   }
 
   return { handle };
@@ -772,10 +818,13 @@ const TASKS = (() => {
     const cors = {
       'access-control-allow-origin': '*',
       'access-control-allow-methods': 'GET, OPTIONS',
+      'access-control-allow-headers': 'X-Read-Key',
       'content-type': 'application/json; charset=utf-8',
     };
 
     if (request.method === 'OPTIONS') return new Response(null, { headers: cors });
+    const locked = READ_GATE.check(request, env, cors);
+    if (locked) return locked;
     if (request.method !== 'GET') {
       return new Response(JSON.stringify({ error: 'GET only' }), { status: 405, headers: cors });
     }
@@ -784,7 +833,7 @@ const TASKS = (() => {
     const cache = caches.default;
     const cacheKey = new Request(new URL(request.url).toString(), { method: 'GET' });
     const hit = await cache.match(cacheKey);
-    if (hit) return hit;
+    if (hit) return READ_GATE.forBrowser(hit);
 
     // ?date=YYYY-MM-DD points the route at another day, for verifying the
     // filters without waiting for a morning to arrive.
@@ -831,7 +880,7 @@ const TASKS = (() => {
       headers: { ...cors, 'cache-control': `public, max-age=${CACHE_SECONDS}` },
     });
     await cache.put(cacheKey, res.clone());
-    return res;
+    return READ_GATE.forBrowser(res);
   }
 
   return { handle };

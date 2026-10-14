@@ -608,6 +608,41 @@
     }
     .error { color: var(--neg); font-size: 11px; }
 
+    /* ── Locked (read key) — /calendar and /tasks ── */
+    .lock-line, .lock-form { grid-column: 1 / -1; } /* tasks card is a 2-col grid */
+    .lock-line { font-size: 12.5px; color: var(--ink-3); padding: 4px 0; }
+    .lock-open {
+      font: inherit;
+      color: var(--accent);
+      background: none;
+      border: none;
+      padding: 0;
+      cursor: pointer;
+    }
+    .lock-open:hover { text-decoration: underline; }
+    .lock-form { display: flex; gap: 6px; max-width: 320px; }
+    .lock-input {
+      flex: 1;
+      min-width: 0;
+      font: 16px var(--mono); /* under 16px, iOS zooms the page on focus */
+      color: var(--ink);
+      background: var(--bg);
+      border: 1px solid var(--line-2);
+      border-radius: var(--r-sm);
+      padding: 5px 8px;
+    }
+    .lock-input:focus { outline: none; border-color: var(--accent); }
+    .lock-save {
+      font: 500 12px var(--sans);
+      color: var(--ink-2);
+      background: var(--bg-3);
+      border: 1px solid var(--line-2);
+      border-radius: var(--r-sm);
+      padding: 5px 12px;
+      cursor: pointer;
+    }
+    .lock-save:hover { border-color: var(--accent); }
+
     /* ── Rail: a column of stacked cards inside the 12-col grid ── */
     .rail {
       grid-column: span 4;

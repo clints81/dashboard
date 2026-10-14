@@ -1,6 +1,6 @@
 # Morning Dashboard — Architecture Reference
 
-Last updated: October 8, 2026
+Last updated: October 14, 2026
 
 ## What this is
 A personal morning dashboard for Clint Sievers, hosted on GitHub Pages. Plain HTML/CSS/JS — no framework, no build step. It exists to replace aimless scrolling with a purposeful briefing.
@@ -29,13 +29,30 @@ It serves these routes:
 | `/` | GET | Returns the latest briefing JSON from KV (`env.BRIEFING`, key `latest`). CORS `*`. |
 | `/` | PUT | Writes briefing JSON to KV. Requires `X-Write-Key` header matching `env.WRITE_KEY`. |
 | `/sports` | GET | Fetches, filters, and caches team/league news from RSS. CORS `*`. 20-min cache. |
-| `/calendar` | GET | Parses ICS calendar feeds (`env.CAL_ICS_1` / `CAL_ICS_2`) for today's events. CORS `*`. 5-min cache. |
-| `/tasks` | GET | Queries the JELC treasurer Notion database (`env.NOTION_TOKEN`) for what's due and recently settled. CORS `*`. 5-min cache. |
+| `/calendar` | GET | Parses ICS calendar feeds (`env.CAL_ICS_1` / `CAL_ICS_2`) for today's events. **Requires `X-Read-Key`.** CORS `*`. 5-min cache. |
+| `/tasks` | GET | Queries the JELC treasurer Notion database (`env.NOTION_TOKEN`) for what's due and recently settled. **Requires `X-Read-Key`.** CORS `*`. 5-min cache. |
 | `/devotion` | GET | Fetches the WELS Daily Devotions RSS feed and extracts verse, reference, title, excerpt. No secret. CORS `*`. 3-hr cache. |
 
-The write key is `WRITE_KEY` in this Worker's Cloudflare settings, with copies in 1Password and as the `DASHBOARD_WRITE_KEY` secret on the `briefing-retrieval` Worker. It was rotated 2026-10-08, when it came out of the Cowork task text. Never in the repo. The other secrets (`CAL_ICS_1`, `NOTION_TOKEN`) live in Cloudflare → Settings → Variables and Secrets, separate from the code editor.
+The write key is `WRITE_KEY` in this Worker's Cloudflare settings, with copies in 1Password and as the `DASHBOARD_WRITE_KEY` secret on the `briefing-retrieval` Worker. It was rotated 2026-10-08, when it came out of the Cowork task text. Never in the repo. The other secrets (`CAL_ICS_1`, `NOTION_TOKEN`, `READ_KEY`) live in Cloudflare → Settings → Variables and Secrets, separate from the code editor.
 
-Each route is one top-level name in `worker.js` (`handleSports`, `CALENDAR`, `TASKS`) plus one line in the `fetch` router. Follow that convention when adding a route — it's what keeps per-route constants (each block has its own `CACHE_SECONDS`) from colliding.
+Each route is one top-level name in `worker.js` (`handleSports`, `CALENDAR`, `TASKS`, `DEVOTION`) plus one line in the `fetch` router. Follow that convention when adding a route — it's what keeps per-route constants (each block has its own `CACHE_SECONDS`) from colliding.
+
+### Read key
+`/calendar` and `/tasks` return Clint's schedule and the church's payables, so they need a read key. Every other route stays public.
+
+Where the key lives:
+- `READ_KEY` secret in this Worker's Cloudflare settings
+- 1Password, item "Dashboard read key"
+- Each device's browser storage (`localStorage["dashReadKey"]`), entered once per device on the card itself
+
+Never in the repo. The page sends it as `X-Read-Key`.
+
+How it behaves:
+- **Worker.** `READ_GATE.check()` runs after OPTIONS (preflights never carry the key) and **before the cache lookup**, so a request without the key can never be served a cached copy. No key gets 401 `{"error":"locked","sources":{"auth":"missing"}}`, a wrong key gets `"rejected"`, and an unset `READ_KEY` fails closed with 500 `"READ_KEY unset"`. Refusals carry the CORS headers; without them the browser hides the status and "locked" looks like a network failure.
+- **Caching.** The browser gets `cache-control: private, no-store`. The copy in `caches.default` keeps `public, max-age=300`, because `cache.put` refuses (413) a response whose Cache-Control says not to store it, and Cloudflare reads both `private` and `no-store` that way. `READ_GATE.forBrowser()` swaps the header on the way out.
+- **Page.** With no key stored, the card shows "Locked on this device · Enter key" and doesn't fetch. If the Worker answers 401, the card shows "Key rejected · Re-enter key". `fetchRetry` doesn't retry a 401. Any other failure keeps the card's normal "… unavailable" line. Saving a key reloads only these two cards.
+
+To rotate: set a new `READ_KEY` in Cloudflare, update 1Password, then re-enter the key on each device. Devices show "Key rejected" until you do.
 
 ### Why a Worker exists at all
 The dashboard is served from `clints81.github.io`. Browsers refuse to let a page read a response from another origin unless that origin sends CORS headers saying it's allowed. Notion doesn't. `nytimes.com` doesn't. Server-side fetches aren't subject to that rule, so the Worker fetches on the dashboard's behalf and re-serves the result with `access-control-allow-origin: *`.
@@ -55,7 +72,7 @@ History: while the briefing ran in Cowork, GitHub was ruled out as the delivery 
 - **Treasurer tasks** — Worker `/tasks` route. JELC tasks from Notion. See below.
 - **Daily devotion** — Worker `/devotion` route. WELS Daily Devotions RSS. See below.
 
-All of these go through `fetchRetry()` in `app.js`: one retry after 2.5s, and a non-200 is treated as failure rather than parsed as JSON.
+All of these go through `fetchRetry()` in `app.js`: one retry after 2.5s, and a non-200 is treated as failure rather than parsed as JSON. The thrown error carries `.status`. A 401 is not retried, so the key-protected cards can tell "locked" from "broken".
 
 ### Static (config.js)
 - Journal streak, journal prompts (one picked per day by day-of-year), window close time
@@ -122,6 +139,7 @@ Load-bearing details, learned the hard way:
 - **ICS lines fold** at 75 octets (a continuation line starts with space/tab); unfold before parsing or long titles arrive truncated.
 - The `sources` block reports each feed as `ok (N in file, M today)`, `unset`, `HTTP nnn`, `not-ics`, or `error: …` — same rule as `/sports`: a blocked feed and a genuinely empty day must not produce identical JSON.
 - `?date=YYYY-MM-DD` points the route at another day, for verifying parsing without waiting for a morning.
+- Key-protected: send `X-Read-Key` (see Read key).
 
 ## The tasks route
 
@@ -138,7 +156,7 @@ Load-bearing details, learned the hard way:
 - **Settled** — `Due Date` between `today−7` and `today`, `Status = Paid or Complete`, descending. A task paid late drops off, which is a visible failure rather than a silent one.
 
 ### The rest
-- **CORS is open (`*`)**, matching the other routes. Confirmed with Clint (2026-09-03): the dashboard is a public browser page, so no client-sent key or origin lock is real security anyway — the realistic choice was "openly public vs. public-behind-an-obscure-URL," and open won for consistency and curl-debuggability.
+- **Key-protected (since 2026-10-14).** Requires `X-Read-Key`; see Read key. This replaces the 2026-09-03 decision to leave the route open. That reasoning held that a client-sent key couldn't be real security on a public page, because any key would have to sit in the public JS. A key entered on each device and kept in its browser storage never appears in the page source, so that objection no longer applies. CORS stays `*`: the key is the lock, not the origin. To debug with curl, send the header: `curl -H "X-Read-Key: …" …/tasks`.
 - The `sources.notion` block is required: `ok (N rows)`, `HTTP 401` (bad/missing token), `HTTP 404` (integration lacks access), or `error: …`. `loadTasks()` fails loudly to an "unavailable" state when it isn't `ok`, so an expired token never reads as a clear week.
 - 5-min cache keyed on the full URL; `?t=N` or `?date=YYYY-MM-DD` force a rebuild / test another day.
 
@@ -196,8 +214,8 @@ Both logs need the Worker's Notion integration connected (page ⋯ → Connectio
 | Something to sit with | Worker `/` | config.js fallback |
 | Your teams | Worker `/sports` | Team news, no scores |
 | Today's workout | Static link | See below |
-| Today (calendar) | Worker `/calendar` | Live; ICS feeds, Chicago time |
-| Treasurer tasks | Worker `/tasks` | Live; JELC Notion, due + settled |
+| Today (calendar) | Worker `/calendar` | Live; ICS feeds, Chicago time; read key |
+| Treasurer tasks | Worker `/tasks` | Live; JELC Notion, due + settled; read key |
 | Daily devotion | Worker `/devotion` | Live; WELS RSS, verse + excerpt |
 | Journal nudge | config.js | |
 | Slow burns | config.js | |
