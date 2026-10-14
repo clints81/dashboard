@@ -15,9 +15,10 @@ const MAX_ATTEMPTS = 3;
 const UNITS_PER_TICK = 4;
 const KV_TTL = 60 * 60 * 24 * 45;
 const HISTORY_DAYS = 30;
-// Cron runs every 5 min from 06:00 to 07:55 UTC. Whatever hasn't finished by
-// the last tick gets recorded as failed and the pools are built anyway.
-const LAST_TICK_UTC = { h: 7, m: 50 };
+// Whatever hasn't finished by 08:30 UTC (3:30am CDT / 2:30am CST) is
+// recorded as failed and the pools are built anyway, leaving the rest of the
+// cron window (to 09:55) for the briefing. Most nights finish by ~07:20.
+const LAST_TICK_UTC = { h: 8, m: 30 };
 
 export function chicagoDate(d = new Date()) {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Chicago', year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
@@ -136,7 +137,7 @@ export async function tick(env, { now = new Date(), force = false, all = false, 
   if (remaining === 0 && batch.length === 0) ({ left: lengthsLeft, summary: lengthSummary } = await lengthStep(run, env, now, all));
   // Only the scheduled deadline tick forces a finish; manual runs outside the
   // window keep going until every source is done or out of attempts.
-  const lastTick = scheduled && now.getUTCHours() === LAST_TICK_UTC.h && now.getUTCMinutes() >= LAST_TICK_UTC.m;
+  const lastTick = scheduled && now.getUTCHours() * 60 + now.getUTCMinutes() >= LAST_TICK_UTC.h * 60 + LAST_TICK_UTC.m;
   // Per-source detail is returned directly as well as saved, because KV reads
   // can lag a write by up to a minute.
   const units = Object.fromEntries(batch.map(s => [s.id, unitSummary(run.units[s.id])]));

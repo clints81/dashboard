@@ -99,7 +99,7 @@ Cron fires every 5 minutes from 06:00 to 09:55 UTC (1:00am CDT / midnight CST; t
 sources (only one NYT call per tick, since NYT allows 5 calls/min), saves
 progress in `run:<date>`, and the tick that finishes the last source builds
 the pools. Failed sources retry on later ticks (3 attempts). Anything still
-unfinished at 07:50 UTC is recorded as failed and the pools are built anyway.
+unfinished at 08:30 UTC (3:30am CDT / 2:30am CST) is recorded as failed and the pools are built anyway.
 
 Arts & Letters Daily's feed has no dates, so each new link's target page is
 fetched for its own `datePublished`. Resolved dates are cached in

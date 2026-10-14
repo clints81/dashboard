@@ -5,7 +5,7 @@ workers_dev = true
 
 # Every 5 minutes, 06:00–09:55 UTC (1:00–4:55am CDT; 12:00–3:55am CST).
 # 06:00 UTC is always after midnight Central, so the run gets the right date.
-# The pool takes ~8 ticks (deadline 07:50). The next tick submits the
+# The pool takes ~8–20 ticks (deadline 08:30). The next tick submits the
 # briefing as a batch and later ticks collect it; at 09:30 an unfinished
 # batch is cancelled and the request made directly (see judge.js).
 [triggers]
