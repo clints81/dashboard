@@ -204,6 +204,9 @@ repeats of stories already seen, whether the floor was filled, whether
 cross-outlet groupings are right, and whether the picks are ones Clint
 would click. Then set `MODEL` to the winner and clear `COMPARE_MODEL`.
 
+**Decided 2026-10-14: Opus 5.5.** Clint compared a week of side-by-side
+editions and found Opus "exactly what I wanted." The comparison is off.
+
 ## Keys
 
 All keys are Worker secrets (`wrangler secret put`) or in the

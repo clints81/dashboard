@@ -23,11 +23,12 @@ fallthrough = true
 # Anything else is shadow mode: the edition is saved and shown at /brief only.
 # Turned on 2026-10-08, after the Cowork tasks were switched off.
 PUBLISH = "on"
-# The model that writes the briefing, and a second model run alongside it in
-# the same batch for comparison at /brief/<date>?ab. Empty COMPARE_MODEL
-# turns the comparison off (it roughly halves its cost again).
+# The model that writes the briefing. Opus 5.5 was chosen over Sonnet 5.5
+# after a side-by-side week (2026-10-07 to 10-13). Setting COMPARE_MODEL
+# (e.g. "claude-sonnet-5-5") runs a second model in the same batch for
+# comparison at /brief/<date>?ab; empty turns that off.
 MODEL = "claude-opus-5-5"
-COMPARE_MODEL = "claude-sonnet-5-5"
+COMPARE_MODEL = ""
 
 # Separate from the dashboard Worker's `briefing-store` namespace on purpose.
 [[kv_namespaces]]
