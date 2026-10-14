@@ -1,0 +1,54 @@
+name = "briefing-retrieval"
+main = "src/index.js"
+compatibility_date = "2026-10-01"
+workers_dev = true
+
+# Every 5 minutes, 06:00–09:55 UTC (1:00–4:55am CDT; 12:00–3:55am CST).
+# 06:00 UTC is always after midnight Central, so the run gets the right date.
+# The pool takes ~8–20 ticks (deadline 08:30). The next tick submits the
+# briefing as a batch and later ticks collect it; at 09:30 an unfinished
+# batch is cancelled and the request made directly (see judge.js).
+[triggers]
+# Plus 12:00 UTC (7am CDT / 6am CST): save the Cowork briefing for /compare.
+crons = ["*/5 6-9 * * *", "0 12 * * *"]
+
+# The briefing prompt is bundled as text.
+[[rules]]
+type = "Text"
+globs = ["**/*.md"]
+fallthrough = true
+
+[vars]
+# "on": publish to the dashboard, KV story log and Notion logs.
+# Anything else is shadow mode: the edition is saved and shown at /brief only.
+# Turned on 2026-10-08, after the Cowork tasks were switched off.
+PUBLISH = "on"
+# The model that writes the briefing. Opus 5.5 was chosen over Sonnet 5.5
+# after a side-by-side week (2026-10-07 to 10-13). Setting COMPARE_MODEL
+# (e.g. "claude-sonnet-5-5") runs a second model in the same batch for
+# comparison at /brief/<date>?ab; empty turns that off.
+MODEL = "claude-opus-5-5"
+COMPARE_MODEL = ""
+
+# Separate from the dashboard Worker's `briefing-store` namespace on purpose.
+[[kv_namespaces]]
+binding = "POOL"
+id = "9ffa5f16b12f4f21a4dd2ed85a2d19ed"
+
+# Links to the dashboard Worker. Needed because same-account workers.dev
+# fetches fail. COWORK is read-only (/compare reads Cowork's briefing with
+# GET /); DASHBOARD is where the judgment step PUTs the edition.
+[[services]]
+binding = "COWORK"
+service = "briefing"
+
+[[services]]
+binding = "DASHBOARD"
+service = "briefing"
+
+[observability]
+enabled = true
+
+# Secrets (set with `npx wrangler secret put <NAME>`, never committed):
+#   NYT_API_KEY, GUARDIAN_API_KEY, RUN_KEY,
+#   ANTHROPIC_API_KEY, NOTION_TOKEN, DASHBOARD_WRITE_KEY
