@@ -343,7 +343,7 @@ Built 2026-10-17 from the Phase 2 brief. On a class morning the card answers: is
 **Verified 2026-10-17:**
 - October's post parsed end to end, shown to Clint before the card was wired: 3 key dates (10/15 12-minute tread, 10/19 500m row, 10/24–31 Hell Week), 6 repeat pairs, 3G on 10/26 and 10/31, Run/Rows on 10/5, 10/9, 10/22. Same result from plain text and from markdown.
 - Bookings: 8 in the next 14 days, each with its class type. Today's class stays in the list after it starts ("Checked In"). No canceled booking was in the window to watch live; the library drops canceled bookings when asked, which the job does.
-- The rows exist with exact titles; October has its body, November and December are empty. **`NOTION_TOKEN` from the Action is verified on the first Phase 2 run**: a token that can't open the database shows as `post: … fetch failed: HTTP 404`.
+- The rows exist with exact titles; October has its body, November and December are empty. **`NOTION_TOKEN` from the Action verified on the first Phase 2 run** (2026-10-17, run 39060229438): `post: 2026-10 ok`, alongside `login: ok (refresh)`, `upcoming: ok (8)` and `put: ok`. If it ever stops, a token that can't open the database shows as `post: … fetch failed: HTTP 404`.
 - A full local run with real OTF data and Notion mocked from October's post (paged blocks) gave today a Strength 50 repeat of 10/3 (missed: no class that day), 10/23 a repeat of 10/7 with its numbers, 10/26 "runs as 3G", and Hell Week at 0 attended, 4 booked of 4. The card was checked in every state above.
 
 ### Storage and route
