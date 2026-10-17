@@ -663,9 +663,16 @@ function otfLastClassHTML(w) {
     ${zoneBar}`;
 }
 
-function otfMonthHTML(month) {
+// Goals: the month's row in Notion ("OTF Monthly Posts") wins, field by
+// field; a blank field falls back to config, so a forgotten month means
+// "the usual", never zero.
+function otfMonthHTML(month, notionGoals) {
   const goals = CONFIG.otf?.goals || {};
-  const goal = goals[month.key] || goals.default || {};
+  const fallback = goals[month.key] || goals.default || {};
+  const goal = {
+    tread: notionGoals?.tread ?? fallback.tread,
+    rower: notionGoals?.rower ?? fallback.rower,
+  };
   const name = dateAtNoon(`${month.key}-01`).toLocaleDateString('en-US', { month: 'long', timeZone: 'UTC' });
   const row = (label, done, target, digits) => {
     const pct = target ? Math.min(100, (done / target) * 100) : 0;
@@ -680,6 +687,101 @@ function otfMonthHTML(month) {
     <div class="otf-month" aria-label="${escapeHTML(name)} so far">
       ${row('Tread', month.tread_miles || 0, goal.tread, 1)}
       ${row('Row', (month.rower_meters || 0) / M_PER_MILE, goal.rower, 1)}
+    </div>`;
+}
+
+// ── Today's lookahead (Phase 2) ──
+// otf-sync joins the monthly post (pasted into Notion) with workouts and
+// bookings and sends a lookahead for each of the next 14 days. The card
+// reads today's entry only. Each empty state says what it is.
+
+const otfMonthName = key =>
+  dateAtNoon(`${key}-01`).toLocaleDateString('en-US', { month: 'long', timeZone: 'UTC' });
+const otfShortDay = ymd => dateAtNoon(ymd).toLocaleDateString('en-US',
+  { weekday: 'short', month: 'numeric', day: 'numeric', timeZone: 'UTC' }).replace(',', '');
+// "Aug 8", or "Aug 8, 2025" when it isn't this year.
+const otfMonthDay = ymd => dateAtNoon(ymd).toLocaleDateString('en-US', {
+  month: 'short', day: 'numeric', timeZone: 'UTC',
+  ...(ymd.slice(0, 4) !== chicagoDate().slice(0, 4) ? { year: 'numeric' } : {}) });
+
+function otfResult(v, unit) {
+  if (v == null || v === '') return '—';
+  if (unit === 'mi') return `${otfFmt(v, 2)} mi`;
+  if (unit === 'm') return `${otfFmt(v)} m`;
+  return String(v).replace(/^0(\d:)/, '$1');  // "01:27.94" -> "1:27.94"
+}
+
+function otfClassTime(start) {
+  const [h, m] = String(start || '').slice(11, 16).split(':').map(Number);
+  return isNaN(h) ? '' : `${(h % 12) || 12}:${String(m).padStart(2, '0')}${h < 12 ? 'am' : 'pm'}`;
+}
+
+function otfRepeatHTML(c) {
+  const r = c.repeat;
+  const of = `Repeat of ${escapeHTML(otfShortDay(r.of))}`;
+  if (r.status === 'missed') return `${of} · you weren’t there`;
+  if (r.status === 'no data') return `${of} · nothing recorded then`;
+  if (r.status === 'other format') return `${of} · you took ${escapeHTML(otfClassLabel(r))} that day`;
+  const parts = [`${otfFmt(r.splats)} splats`];
+  if (r.tread_miles) parts.push(`${otfFmt(r.tread_miles, 2)} mi${r.avg_mph ? ` @ ${otfFmt(r.avg_mph, 1)}` : ''}`);
+  if (r.rower_meters) parts.push(`${otfFmt(r.rower_meters)} m`);
+  return `${of}: ${parts.join(' · ')}`;
+}
+
+function otfPlanHTML(plan) {
+  if (!plan) return '';
+  const today = chicagoDate();
+  const key = today.slice(0, 7);
+  const month = plan.months?.[key];
+  const day = plan.days?.[today];
+  const lines = [];
+
+  // The post for this month. Fetching and parsing fail differently, and
+  // neither may read as "nothing on today".
+  const state = month?.state || 'no row';
+  const name = otfMonthName(key);
+  if (state === 'no row') lines.push(['soft', `No monthly post for ${name} yet.`]);
+  else if (state === 'empty') lines.push(['soft', `No post pasted for ${name} yet.`]);
+  else if (state.startsWith('unparsed')) {
+    const what = state.includes('repeats') && state.includes('key dates') ? 'repeats or key dates'
+      : state.includes('key dates') ? 'key dates' : 'repeats';
+    lines.push(['warn', `Couldn’t read this month’s ${what}.`]);
+  } else if (state !== 'ok') lines.push(['warn', 'Couldn’t fetch this month’s post.']);
+
+  if (day) {
+    for (const c of day.classes || []) {
+      if (!c.repeat && !c.runs_as_3g) continue;
+      const head = `<b>${otfClassTime(c.start)} ${escapeHTML(otfClassLabel(c))}</b>${c.runs_as_3g ? ' · runs as 3G' : ''}`;
+      lines.push(['', c.repeat ? `${head} · ${otfRepeatHTML(c)}` : head]);
+    }
+    for (const b of day.benchmarks || []) {
+      const what = b.kind === 'specialty' ? 'specialty workout' : 'benchmark';
+      if (b.unmapped) {
+        lines.push(['warn', `Today’s ${what} isn’t mapped: ${escapeHTML(b.name)}`]);
+      } else if (!b.history) {
+        lines.push(['', `<b>${escapeHTML(b.name)}</b> today · no past result`]);
+      } else {
+        lines.push(['', `<b>${escapeHTML(b.name)}</b> today · last ${escapeHTML(otfResult(b.last, b.unit))}${
+          b.last_date ? ` (${escapeHTML(otfMonthDay(b.last_date))})` : ''} · best ${escapeHTML(otfResult(b.best, b.unit))}`]);
+      }
+    }
+    for (const e of day.events || []) {
+      const when = e.on ? '' : ` · starts ${escapeHTML(otfShortDay(e.start))}`;
+      const progress = e.need ? ` · ${e.attended} attended, ${e.booked} booked of ${e.need}` : '';
+      lines.push(['', `<b>${escapeHTML(e.name)}</b>${progress}${when || (e.need ? '' : ` through ${escapeHTML(otfShortDay(e.end))}`)}`]);
+    }
+    const nb = day.next_benchmark;
+    if (nb) {
+      lines.push(['muted', `Next: ${escapeHTML(otfShortDay(nb.date))} · ${escapeHTML(nb.name)} · ${nb.booked ? 'booked' : 'not booked'}`]);
+    }
+  }
+  if (!lines.length) return '';
+
+  const edited = month?.edited ? `post from ${escapeHTML(otfMonthDay(month.edited.slice(0, 10)))}` : '';
+  return `
+    <div class="otf-plan">
+      <div class="otf-plan-head"><span>Today</span><span>${edited}</span></div>
+      ${lines.map(([kind, html]) => `<div class="otf-plan-line${kind ? ` otf-plan-${kind}` : ''}">${html}</div>`).join('')}
     </div>`;
 }
 
@@ -749,9 +851,10 @@ async function loadOtf() {
 
     el.innerHTML = `
       ${warnings.join('')}
+      ${otfPlanHTML(data.plan)}
       ${last ? otfLastClassHTML(last)
         : `<div class="otf-empty">No classes in the last ${data.days || 45} days.</div>`}
-      ${month.key ? otfMonthHTML(month) : ''}`;
+      ${month.key ? otfMonthHTML(month, data.plan?.months?.[month.key]?.goals) : ''}`;
   }
 }
 

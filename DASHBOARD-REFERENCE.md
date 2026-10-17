@@ -86,7 +86,7 @@ All of these go through `fetchRetry()` in `app.js`: one retry after 2.5s, and a 
 
 ### Static (config.js)
 - Fallback "something to sit with" (shown only if the briefing fetch fails)
-- Orangetheory subreddit name, and the monthly tread and rower goals (`CONFIG.otf.goals`)
+- Orangetheory subreddit name, and the fallback monthly goals (`CONFIG.otf.goals`; Notion's row wins)
 - Sports cap (`maxItems`)
 
 ---
@@ -255,7 +255,7 @@ Both logs need the Worker's Notion integration connected (page ⋯ → Connectio
 | Something to sit with | Worker `/` | config.js fallback; "Earlier this week" strip from `/sitwith` (Mon–Sat) |
 | Last week's reads | Worker `/sitwith` | Sundays only |
 | Your teams | Worker `/sports` | Team news, no scores |
-| Orangetheory | Worker `/otf` | Last class, month vs goal, workout-thread link; read key. See below |
+| Orangetheory | Worker `/otf` | Today's lookahead, last class, month vs goal, workout-thread link; read key. See below |
 | Today (calendar) | Worker `/calendar` | Live; ICS feeds, Chicago time; read key |
 | Treasurer tasks | Worker `/tasks` | Live; JELC Notion, due + settled; read key |
 | Daily devotion | Worker `/devotion` | Live; WELS RSS, verse + excerpt |
@@ -269,12 +269,12 @@ Job search pipeline, JELS expansion, NYT Games. Markup, CSS, JS, and config all 
 
 ## The Orangetheory card
 
-Added 2026-10-17, replacing the static Reddit link. Two jobs: stop entering every class into Notion by hand, and help Clint prepare for class in the morning. Planned in the dashboard chat on 2026-10-17; Phase 1 is built, Phase 2 is in the Backlog.
+Added 2026-10-17, replacing the static Reddit link. Two jobs: stop entering every class into Notion by hand, and help Clint prepare for class in the morning. Planned in the dashboard chat on 2026-10-17. Phase 1 (the sync, the last class, the month) and Phase 2 (the monthly post and today's lookahead) are both built.
 
 ### Decisions
 - **Orangetheory's own data is the system of record.** It already holds the full history, so nothing is copied into Notion. A copy would be a second store to keep in sync.
 - **Nothing writes to Notion.** The Notion "OTF Class List" database (~1,387 classes) is frozen as an archive once Clint reaches class 1400, about a month out. He keeps entering by hand until then, on purpose.
-- **Notion's only future role** is holding what only Clint can supply: the r/orangetheory monthly post, pasted in once a month (Phase 2).
+- **Notion's only future role** is holding what only Clint can supply: the r/orangetheory monthly post, pasted in once a month, and that month's goals (Phase 2, below).
 - **Workout focus is dropped.** Clint's "Strength" tag meant the block focus, not a Strength 50 class. OTF doesn't publish focus in advance, and comparing a repeat to its own earlier template is already like-for-like.
 - **Target cost is $0.** otf-api is MIT-licensed, the Action runs ~3 times a day well inside the free 2,000 private-repo minutes, and there are no model calls.
 - **No manual override yet** (asked 2026-10-17: studio tech sometimes records wrong numbers). It's rare, the card shows one class and month totals, so a bad value shifts one glance and one month's sum. If it's ever needed: a small overrides file in the private otf-sync repo, keyed by class start time, that the job applies and the card marks as corrected. Not Notion, per the decision above. In the Backlog.
@@ -282,7 +282,7 @@ Added 2026-10-17, replacing the static Reddit link. Two jobs: stop entering ever
 ### otf-sync (where the code runs)
 otf-api is Python and logs in through OTF's AWS Cognito pool, caching tokens and a device key on disk. Neither Worker can host that (JS, free plan, no disk, ~10ms CPU). So it runs as a **scheduled GitHub Action in the private repo `clints81/otf-sync`**. It's private because this dashboard repo is public and Action logs in a public repo are public. Its `CLAUDE.md` forbids printing workout data or credentials to the log; the job prints counts and statuses only and silences otf-api's logger, which logs raw responses and the account email on some error paths.
 
-- **Secrets** (Actions secrets, copies in 1Password): `OTF_EMAIL`, `OTF_PASSWORD`, `DASHBOARD_WRITE_KEY`.
+- **Secrets** (Actions secrets, copies in 1Password): `OTF_EMAIL`, `OTF_PASSWORD`, `DASHBOARD_WRITE_KEY`, `NOTION_TOKEN` (Phase 2).
 - **Schedule** (UTC cron, can start late): 08:40, 15:40, 23:40 UTC, i.e. 3:40am, 10:40am and 6:40pm CDT (an hour earlier in CST). The first keeps the morning fresh; the other two pick up a class the same day. Also runnable by hand (workflow_dispatch).
 - **Pinned:** otf-api 0.21.1 and every dependency, in `requirements.txt`. Upgrading otf-api is its own change.
 - **`TZ: America/Chicago` on the runner** is load-bearing: otf-api compares class start times (studio local, no zone) with the machine's clock, and a UTC runner would count a class later today as already done.
@@ -292,10 +292,12 @@ otf-api is Python and logs in through OTF's AWS Cognito pool, caching tokens and
 ### The payload
 `PUT /otf` with `{attempted_at, ok, sources, data?}`. `ok` is false when the login or the workout fetch failed, and then there's no `data`.
 
-- `sources`: `login`, `workouts` (`ok (N)` or `failed: <type>`), `parse`, `benchmarks`, `month_stats`, and `new_class_types` when OTF sent a class type otf-api doesn't know (see below). **`parse` is the "fetched but didn't parse" check.** otf-api drops a booking it can't read (a new class type, a renamed field) and only logs it, which would read as "no class". The job compares raw bookings, parsed bookings and workouts over the same window and reports any gap, e.g. `1 of 33 bookings didn't parse`.
+- `sources`: `login`, `workouts` (`ok (N)` or `failed: <type>`), `parse`, `benchmarks`, `month_stats`, `upcoming`, `post` (Phase 2, e.g. `2026-10 ok; 2026-11 empty`), and `new_class_types` when OTF sent a class type otf-api doesn't know (see below). **`parse` is the "fetched but didn't parse" check.** otf-api drops a booking it can't read (a new class type, a renamed field) and only logs it, which would read as "no class". The job compares raw bookings, parsed bookings and workouts over the same window and reports any gap, e.g. `1 of 33 bookings didn't parse`.
 - `data.workouts`: the last 45 days (so a repeat's original is included), newest first. Per class: `start` (studio local, no zone), `type`, `name`, `coach`, `attended`, `has_data`, `splats`, `calories`, `steps`, `avg_hr`, `peak_hr`, `zones` (whole minutes), `tread` {`miles`, `avg_mph`, `max_mph`, `elev_ft`}, `rower` {`meters`, `pace_500m`, `watts`}.
-- `data.month`: `key` (YYYY-MM, Chicago), `classes`, `tread_miles`, `rower_meters`, summed from the classes, plus OTF's own month totals as `otf_reported`, a cross-check only (they carry no units).
-- `data.benchmarks`: each benchmark with OTF's ID, name, unit, best/last/previous and the last 10 dated results. Body-weight challenges (unit `lb`) are left out.
+- `data.month`: `key` (YYYY-MM, Chicago), `classes`, `tread_miles`, `rower_meters`, summed from the classes, plus OTF's own month totals as `otf_reported`, a cross-check only. They carry no unit label, but they're meters: on 2026-10-17 OTF's tread total was 29,612, exactly the 18.4 miles summed from the classes.
+- `data.benchmarks`: each benchmark with OTF's ID, name, unit (`mi`, `m`, `time`), best/last/previous and the last 10 dated results, already converted (below). `otf_unit` keeps OTF's own unit. Body-weight challenges (unit `lb`) are left out.
+- `data.upcoming` (Phase 2): booked classes from today through the next 13 days, `{start, type, name, status}`, canceled ones left out.
+- `data.plan` (Phase 2): the monthly post and the lookahead. See Phase 2 below.
 
 Fields that don't mean what they seem (verified 2026-10-17):
 - **`peak_hr`, not `max_hr`.** otf-api's `max_hr` is the member's configured maximum. The highest heart rate in the class, Notion's "Max heart rate", is `peak_hr`.
@@ -303,8 +305,46 @@ Fields that don't mean what they seem (verified 2026-10-17):
 - **The class type is a reliable field; 2G/3G is not.** otf-api knows ORANGE_60, ORANGE_90, STRENGTH_50, TREAD_50 and OTHER. 2G vs 3G exists only in the name ("Orange 60 Min 2G"). Clint's studio names are consistent (120 days: 53 × 2G, 2 × 3G, 1 Tornado, 10 Strength 50, 2 Tread 50).
 - **OTF has more class types than otf-api knows.** The first dry run (2026-10-17) reported `1 of 25 bookings didn't parse`: a Hyrox class, type `HYROX_60`, which otf-api 0.21.1 (the newest) rejects, dropping the whole class. So `sync.py` reads an unknown type as OTHER before otf-api parses it, keeps OTF's real value in the payload's `type`, and lists it in `sources.new_class_types`. The card labels such a class by its name. The `parse` check stays for any other kind of breakage.
 - **A class can have no data.** Phone left at home: attended, no performance summary. The card says "Attended · nothing recorded".
-- **Benchmark names don't match the monthly post** ("12 MIN Treadmill" vs "12 Minute Tread for Distance"). Phase 2 matches on OTF's benchmark ID through a small hand-made table, not on names. The list also covers specialty workouts (Orange Everest, Inferno, Catch Me If You Can), which Clint tracks the same way.
-- **"12 MIN Treadmill" reports its unit as km** though the app shows miles. Check one result against Notion's Benchmark info before converting (Phase 2).
+- **Benchmark names don't match the monthly post** ("12 MIN Treadmill" vs "12 Minute Tread for Distance"). Phase 2 matches on OTF's benchmark ID through a hand-made table (`BENCHMARK_IDS` in otf-sync's `post.py`), not on names. The list also covers specialty workouts (Orange Everest, Inferno, Catch Me If You Can), which Clint tracks the same way.
+- **OTF's "km" really is km** although the app shows miles. Checked 2026-10-17: all 7 of Clint's 12-minute results in Notion's Benchmark info match OTF's at a ratio of 1.609. `sync.py` converts km to miles for every benchmark OTF reports in km (12 MIN Treadmill, Orange Everest, Catch Me If You Can, Marathon Month).
+- **Timed benchmarks arrive as text**, `"01:27.94"` or `"06:38"`, matching Notion exactly (500m, 1000m and 2000m rows, 1 mile, quarter mile). The card drops the leading zero. Two 1-mile results in Notion marked "PW" (3/23/26, 6/16/25) have no OTF result those days; probably logged as power walker.
+
+### Phase 2: the monthly post and today's lookahead
+Built 2026-10-17 from the Phase 2 brief. On a class morning the card answers: is this a repeat, and how did the original go? Is today a benchmark, and what's my last and best? Is a special event on?
+
+**Setup (by Clint):**
+- Notion database **"OTF Monthly Posts"**: database `3fcf8d21-7e64-8067-9827-e4fff9c8fc02`, data source `3fcf8d21-7e64-80f7-b86c-000be82765d9`. One row per month: **Month** (title, exactly `YYYY-MM`), **Tread Goal**, **Rower Goal**. The page body is the **whole** r/orangetheory monthly post, pasted as-is.
+- A Notion connection **"otf-sync"** (internal, read content only, no user info), connected only to this database; rows inherit it.
+- Actions secret **`NOTION_TOKEN`** in otf-sync, separate from the Worker's Notion token on purpose: the Action can open this one database and nothing else.
+
+**Decisions:**
+- **Paste the whole post**, not selected sections: picking sections on a phone is fiddly, and the job finds what it needs.
+- **Re-paste when the moderator edits the post.** The card shows "post from <date>" from the page's last-edited time.
+- **Goals move to Notion** with the config fallback (above).
+- **otf-sync parses and joins**, not the Worker, so plan and results meet in one place. Trade-off: a fresh paste shows after the job's next run.
+- **Benchmarks match on OTF's ID** through the hand-made table, not on names.
+
+**How the job reads it** (otf-sync `plan.py` and `post.py`):
+- Queries the data source for the rows of every month the lookahead touches, by exact title, and reads each page's blocks as plain text (Notion API `2025-09-03`). Markdown left in a paste (`**`, links, `- ` bullets) is stripped, so both read the same.
+- **Key dates:** a single date or a range, name, kind (`benchmark`, `event`, `specialty`). The row's Month supplies the year; a December post naming January dates rolls over. An event's "attend class N out of M days" is read from its own bullet.
+- **Repeats:** the "Repeat templates are as follows" pairs, for standard 60-minute classes. **Strength 50 and Tread 50** use the post's prose rule, coded rather than parsed: days 15–28 repeat days 1–14, and the 29th–31st are bonus templates. Tornado, 90-minute and Hyrox classes don't follow the repeat dates, so they get nothing.
+- **3G-style dates** ("runs as 3G" even when the studio lists 2G) and **Run/Row dates** are read too.
+- **The lookahead covers today and the next 13 days**, so a 6:40pm run is still right the next morning. The card reads only today's entry. Per day: booked classes (each with its repeat: the original's splats, tread miles at average mph and rower meters; or "missed", "no data" or "other format"; and "runs as 3G"), the day's benchmarks (last and best, already converted), events from a week before they start (with attended and booked counts against the post's goal), and the next benchmark with whether he's booked.
+- **Fetching and parsing are reported apart** in `sources.post` and `plan.months[YYYY-MM].state`: `ok`, `empty`, `no row`, `unparsed (repeats)`, `unparsed (key dates)`, or `fetch failed: …` (a 404 means the connection can't see the database).
+
+**On the card** (the "Today" block, a few lines):
+- `6:15am 2G · Repeat of Wed 10/7: 20 splats · 2.75 mi @ 7.1 · 1,650 m`, or `· you weren't there`, `· nothing recorded then`, `· you took Strength 50 that day`.
+- `500 Meter Row today · last 1:27.94 (Aug 8, 2025) · best 1:27.94`
+- `Hell Week · 0 attended, 4 booked of 4 · starts Sat 10/24`
+- `Next: Mon 10/19 · 500 Meter Row · booked`
+- Empty states, never blank: "No monthly post for November yet." (no row), "No post pasted for November yet." (empty body), "Couldn't read this month's repeats." (or key dates), "Couldn't fetch this month's post.", and "Today's benchmark isn't mapped: <name as in the post>".
+- With no booking today, only the event and next-benchmark lines show. With nothing to say and the post fine, the block is left out.
+
+**Verified 2026-10-17:**
+- October's post parsed end to end, shown to Clint before the card was wired: 3 key dates (10/15 12-minute tread, 10/19 500m row, 10/24–31 Hell Week), 6 repeat pairs, 3G on 10/26 and 10/31, Run/Rows on 10/5, 10/9, 10/22. Same result from plain text and from markdown.
+- Bookings: 8 in the next 14 days, each with its class type. Today's class stays in the list after it starts ("Checked In"). No canceled booking was in the window to watch live; the library drops canceled bookings when asked, which the job does.
+- The rows exist with exact titles; October has its body, November and December are empty. **`NOTION_TOKEN` from the Action is verified on the first Phase 2 run**: a token that can't open the database shows as `post: … fetch failed: HTTP 404`.
+- A full local run with real OTF data and Notion mocked from October's post (paged blocks) gave today a Strength 50 repeat of 10/3 (missed: no class that day), 10/23 a repeat of 10/7 with its numbers, 10/26 "runs as 3G", and Hell Week at 0 attended, 4 booked of 4. The card was checked in every state above.
 
 ### Storage and route
 KV key `otf-sync` in `env.BRIEFING` (named so it can't collide with `latest` or `sitwith-archive`), holding `{data, attempt}`. A failed sync updates `attempt` only, so the card keeps the last good numbers **and** says the sync failed. GET returns `{data, attempt, sources: {kv}}`, where `kv` is `ok`, `empty` (no sync yet), `unreadable` or `error: …`. Order inside the route: OPTIONS, then PUT (write key), then `READ_GATE.check()`, then the cache.
@@ -312,7 +352,8 @@ KV key `otf-sync` in `env.BRIEFING` (named so it can't collide with `latest` or 
 ### On the page
 Below "The rest of the morning", at the top of the 4-wide column beside Treasurer tasks, with On this day under it:
 - **Last class:** day, time, format, coach; splats, tread miles at average mph, rower meters; zone minutes as a thin bar in OTF's five colors with the minutes beneath.
-- **This month:** tread and rower miles against the goal, as two bars. Goals live in `config.js` (`CONFIG.otf.goals`): a default of tread 32 and rower 15, plus a line for any month Clint wants different. Tread 32 is his usual target; the rower goal is a bonus. The Notion "OTF Months" database held them before, set by hand each month (tread 25–35, rower always 15). The Notion formulas can't be read through the Notion connector, so the goals came from the Months rows, not the formula text. Rower miles = meters ÷ 1609.344.
+- **Today (Phase 2):** see Phase 2 below. It sits above the last class.
+- **This month:** tread and rower miles against the goal, as two bars. **Goals come from the month's row in Notion "OTF Monthly Posts"** (Tread Goal, Rower Goal), field by field. A blank field falls back to `config.js` (`CONFIG.otf.goals`, default tread 32, rower 15), so a forgotten month means "the usual", never zero, and changing a goal needs no commit. Tread 32 is Clint's usual target; the rower goal is a bonus. (Before Phase 2, goals lived only in config, copied from the old Notion "OTF Months" database: tread 25–35, rower always 15. Note October's row in the new database says tread 30, not 32.) Rower miles = meters ÷ 1609.344.
 - **Badge:** classes this month ("11 in Oct").
 - **Never silently blank or stale:** a failed sync says so with its time and the date of the data shown; data older than 36h (`CONFIG.otf.staleHours`) says "Not updated since …"; a parse gap shows "Partial: …"; no sync yet says so. Locked and rejected key states work as on the other protected cards.
 - **Footer:** the r/orangetheory link, which stays (below).
@@ -322,7 +363,7 @@ Below "The rest of the morning", at the top of the 4-wide column beside Treasure
 **Placement (Clint's call, 2026-10-17):** below the band, not in the top rail. He doesn't go every day, so he'd rather scroll to it than see it first. It also keeps the top rail at its old length: under Today it pushed the rail ~130px past the briefing on a quiet day. The lower column (`.rail-lower`) and the tasks card are each sized to their own content (`align-self: start`), so neither stretches to the other. Between 900 and 1000px wide the column stays beside tasks; under 900 everything stacks.
 
 ### The workout-thread link (why it's still a link)
-Reddit blocks programmatic reads of its JSON endpoints. `reddit.com/r/orangetheory/search.json` returns "blocked by network security" **even from a plain browser tab**. A Worker proxy does not help — the block is on Reddit's side, not the browser's. The sanctioned route is Reddit's OAuth API, which isn't worth a client secret for one link. That decision stays closed: nothing reads Reddit programmatically. Clint reads the post himself, and in Phase 2 pastes the monthly post into Notion.
+Reddit blocks programmatic reads of its JSON endpoints. `reddit.com/r/orangetheory/search.json` returns "blocked by network security" **even from a plain browser tab**. A Worker proxy does not help — the block is on Reddit's side, not the browser's. The sanctioned route is Reddit's OAuth API, which isn't worth a client secret for one link. That decision stays closed: nothing reads Reddit programmatically. Clint reads the post himself and pastes the monthly post into Notion (Phase 2).
 
 So the thread is a static link, now the footer of the Orangetheory card. It can't tell you whether today's thread is up. It saves the hunt for it, and it renders even when the card is locked or failing.
 
@@ -368,14 +409,7 @@ Before filtering on any field, ask whether it carries the meaning you think it d
 - **Strategy Muse card**, behind the read key: a few lines (next milestones, hours against plan). The tracker is an Apps Script in the Strategy Muse Google account and can serve a minimal summary. The project plan is a Claude.ai artifact the Worker can't read, so it needs a copy that's refreshed whenever a workstream is fleshed out.
 - **Family calendar** in the `CAL_ICS_2` slot, waiting on sharing the family Apple calendar. Preferred over a school or community calendar.
 - **Delete the `/sitwith` SEED** in `worker.js` after Oct 21, 2026, once the archive itself covers a full week.
-- **Orangetheory October comparison** (Phase 1, item 4 of the brief; not yet run): for every class from Oct 1 to the end of manual entry, compare the API's zone minutes, calories, avg/peak HR, steps, tread miles, avg tread speed, rower meters and splats with OTF Class List, and give Clint a short mismatch report. Local and one-time; the report is never committed. Confirms each field means what the Notion field meant before he stops entering by hand.
-- **Orangetheory Phase 2: monthly post and preparation lookahead.** Waits on Phase 1 review.
-  - Input: a Notion page each month where Clint pastes, as-is, the r/orangetheory monthly post's Key Dates bullets (`October 19 (Monday): 500 Meter Row; benchmark.`, `October 24 (Saturday) - October 31 (Saturday): Hell Week; special event.`) and the repeat-templates line (`Repeat templates are as follows: 10/17 = 10/1, 10/18 = 10/2, ...`). "Other info" bullets only if cheap.
-  - otf-sync reads that page with its own Notion token, parses it, joins it with the workouts and adds the result to the same payload.
-  - Card: today is a repeat → show the original date's numbers (on 10/17, show 10/1). Today is a benchmark or specialty workout (Orange Everest, Inferno, Catch Me If You Can) → show the last result. Inside a special event → label it (replaces Notion's Special Note). Optionally one line for the next benchmark ("Mon 10/19 · 500m row").
-  - Parse failure is loud ("Couldn't read this month's repeats"), never an empty lookahead. The moderator may reword the post.
-  - Match benchmarks on OTF's ID via a hand-made table, not by name. Check the "12 MIN Treadmill" km unit against Notion before converting.
-  - Fallback if the API's history falls short: OTF Class List's "Benchmark info" text (`500m row: 1:29`), read once, not synced.
+- **Orangetheory October comparison** (Phase 1, item 4 of the brief; not yet run, needs the full month): for every class from Oct 1 to the end of manual entry, compare the API's zone minutes, calories, avg/peak HR, steps, tread miles, avg tread speed, rower meters and splats with OTF Class List, and give Clint a short mismatch report. Local and one-time; the report is never committed. Confirms each field means what the Notion field meant before he stops entering by hand.
 - **Orangetheory override** for a class the studio recorded wrong: decided not yet (see The Orangetheory card).
 
 ---

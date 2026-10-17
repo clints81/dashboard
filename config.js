@@ -34,9 +34,9 @@ const CONFIG = {
   },
 
   // ── Orangetheory card ───────────────────────
-  // Monthly goals in miles. Tread 32 is the usual target; rower is a bonus.
-  // To change one month, add a line like:
-  //     "2026-12": { tread: 28, rower: 15 },
+  // Fallback monthly goals, in miles. The month's row in Notion ("OTF
+  // Monthly Posts": Tread Goal, Rower Goal) wins; a blank field there falls
+  // back to these. Tread 32 is the usual target; rower is a bonus.
   // The card converts rower meters to miles at 1609.344 m per mile.
   otf: {
     url: "https://briefing.clintsievers.workers.dev/otf",
