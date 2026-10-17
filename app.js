@@ -98,7 +98,7 @@ async function fetchRetry(url, { headers, tries = 2, delayMs = 2500 } = {}) {
 }
 
 // ── Read key ───────────────────────────────────────────────────────────
-// /calendar and /tasks need X-Read-Key. The key is entered once per device
+// /calendar, /tasks and /otf need X-Read-Key. The key is entered once per device
 // and kept in this browser's storage, never in the repo or this file.
 // Storage can throw (private mode, blocked site data), so every access is
 // guarded, and a key saved while storage is unavailable still works until
@@ -148,15 +148,16 @@ function openKeyField(el) {
   });
 }
 
-// Only the key-protected cards. Clearing both first also closes a key field
-// left open on the other card.
+// Only the key-protected cards. Clearing them all first also closes a key
+// field left open on another card.
 function reloadProtected() {
-  for (const id of ['cal-content', 'tasks-content']) {
+  for (const id of ['cal-content', 'tasks-content', 'otf-content']) {
     const el = $(id);
     if (el) el.innerHTML = `<div class="loading">Loading…</div>`;
   }
   loadCalendar();
   loadTasks();
+  loadOtf();
 }
 
 // The iPad refreshes on returning to the foreground. Leaving to copy the key
@@ -579,15 +580,190 @@ async function loadDevotion() {
   }
 }
 
-// ── Orangetheory daily workout ─────────────────────────────────────────
+// ── Orangetheory ───────────────────────────────────────────────────────
+// Worker /otf route, behind the read key. The otf-sync GitHub Action PUTs
+// there a few times a day. The Worker keeps the last good data and the last
+// attempt separately, so a failed sync shows up here as a failed sync, with
+// the older numbers still visible, never as a blank or quiet card.
+
+const OTF_ZONES = ['gray', 'blue', 'green', 'orange', 'red'];
+const M_PER_MILE = 1609.344;
+
+// "Sat 3:40am" in Chicago, from an ISO instant with an offset.
+function otfWhen(iso) {
+  const d = new Date(iso);
+  if (isNaN(d)) return 'an unknown time';
+  const tz = CONFIG.location?.timezone || 'America/Chicago';
+  const day = d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', timeZone: tz });
+  const time = d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: tz })
+    .replace(' ', '').toLowerCase();
+  return `${day}, ${time}`;
+}
+
+// "2G", "3G", "Tornado", "Strength 50", "Tread 50". The class type is the
+// reliable field; 2G/3G only exists in the name.
+function otfClassLabel(w) {
+  const name = w.name || '';
+  if (w.type === 'ORANGE_60' || w.type === 'ORANGE_90') {
+    const g = name.match(/\b([23])G\b/);
+    const base = g ? `${g[1]}G` : /tornado/i.test(name) ? 'Tornado' : 'Orange';
+    return w.type === 'ORANGE_90' ? `90-min ${base}` : base;
+  }
+  if (w.type === 'STRENGTH_50') return 'Strength 50';
+  if (w.type === 'TREAD_50') return 'Tread 50';
+  return name || 'Class';
+}
+
+// w.start is the studio's local wall-clock time with no zone, so it's
+// compared as a date string, never turned into an instant.
+function otfDayLabel(start) {
+  const ymd = (start || '').slice(0, 10);
+  const today = chicagoDate();
+  if (ymd === today) return 'Today';
+  if (ymd === shiftDate(today, -1)) return 'Yesterday';
+  return dateAtNoon(ymd).toLocaleDateString('en-US', {
+    weekday: 'short', month: 'short', day: 'numeric', timeZone: 'UTC' });
+}
+
+const otfFmt = (n, digits = 0) => n == null ? '—'
+  : Number(n).toLocaleString('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits });
+
+function otfLastClassHTML(w) {
+  const t = String(w.start || '').slice(11, 16);
+  const [h, m] = t.split(':').map(Number);
+  const time = t ? `${(h % 12) || 12}:${String(m).padStart(2, '0')}${h < 12 ? 'am' : 'pm'}` : '';
+  const when = `
+    <div class="otf-when">
+      <span class="otf-when-day">${escapeHTML(otfDayLabel(w.start))}</span>
+      ${time ? `· ${time} ` : ''}· ${escapeHTML(otfClassLabel(w))}${w.coach ? ` · ${escapeHTML(w.coach)}` : ''}
+    </div>`;
+
+  // A class with nothing recorded (phone left at home, strap not paired) is
+  // rare and real. Say so instead of showing zeros.
+  if (!w.has_data) return `${when}<div class="otf-nodata">Attended · nothing recorded</div>`;
+
+  const miles = w.tread?.miles, mph = w.tread?.avg_mph, meters = w.rower?.meters;
+  const z = w.zones || {};
+  const total = OTF_ZONES.reduce((s, k) => s + (z[k] || 0), 0);
+  const zoneBar = total ? `
+    <div class="otf-zones" role="img" aria-label="${OTF_ZONES.map(k => `${k} ${z[k] || 0} min`).join(', ')}">
+      ${OTF_ZONES.map(k => z[k] ? `<i class="z-${k}" style="width:${(z[k] / total) * 100}%"></i>` : '').join('')}
+    </div>
+    <div class="otf-zone-mins">
+      ${OTF_ZONES.map(k => `<span><b class="z-${k}">●</b> ${z[k] || 0}</span>`).join('')}
+    </div>` : '';
+
+  return `${when}
+    <div class="otf-stats">
+      <div><div class="otf-num">${otfFmt(w.splats)}</div><div class="otf-unit">splats</div></div>
+      <div><div class="otf-num">${miles ? otfFmt(miles, 2) : '—'}</div>
+           <div class="otf-unit">tread mi${miles && mph ? ` · ${otfFmt(mph, 1)} mph` : ''}</div></div>
+      <div><div class="otf-num">${meters ? otfFmt(meters) : '—'}</div><div class="otf-unit">row m</div></div>
+    </div>
+    ${zoneBar}`;
+}
+
+function otfMonthHTML(month) {
+  const goals = CONFIG.otf?.goals || {};
+  const goal = goals[month.key] || goals.default || {};
+  const name = dateAtNoon(`${month.key}-01`).toLocaleDateString('en-US', { month: 'long', timeZone: 'UTC' });
+  const row = (label, done, target, digits) => {
+    const pct = target ? Math.min(100, (done / target) * 100) : 0;
+    return `
+      <div class="otf-goal${target && done >= target ? ' otf-goal-met' : ''}">
+        <span>${label}</span>
+        <span class="otf-bar"><i style="width:${pct}%"></i></span>
+        <span class="otf-goal-num">${otfFmt(done, digits)}${target ? ` / ${otfFmt(target)}` : ''} mi</span>
+      </div>`;
+  };
+  return `
+    <div class="otf-month" aria-label="${escapeHTML(name)} so far">
+      ${row('Tread', month.tread_miles || 0, goal.tread, 1)}
+      ${row('Row', (month.rower_meters || 0) / M_PER_MILE, goal.rower, 1)}
+    </div>`;
+}
+
+async function loadOtf() {
+  const el = $('otf-content');
+  const badge = $('otf-badge');
+  if (!el || keyFieldOpen(el)) return;
+
+  const url = CONFIG.otf?.url || 'https://briefing.clintsievers.workers.dev/otf';
+  const key = getReadKey();
+  if (!key) return renderLocked(el, badge, false);
+
+  const unavailable = msg => {
+    el.innerHTML = `<div class="error">${escapeHTML(msg)}</div>`;
+    if (badge) badge.textContent = '—';
+  };
+
+  try {
+    const res = await fetchRetry(`${url}?t=${Date.now()}`, { headers: { 'X-Read-Key': key } });
+    renderOtf(await res.json());
+  } catch (e) {
+    if (e.status === 401) return renderLocked(el, badge, true);
+    unavailable('Orangetheory unavailable');
+  }
+
+  // Split from the fetch so any state can be checked from the console:
+  // renderOtf({data, attempt, sources: {kv: 'ok'}}).
+  function renderOtf(d) {
+    const kv = d.sources?.kv;
+    if (kv === 'empty') return unavailable('No Orangetheory data yet. The first sync hasn’t run.');
+    if (kv !== 'ok') return unavailable('Orangetheory unavailable');
+
+    const { data, attempt } = d;
+    const warnings = [];
+    if (attempt && !attempt.ok) {
+      const s = attempt.sources || {};
+      const reason = (s.login || '').startsWith('failed') ? 'couldn’t log in to Orangetheory'
+        : (s.workouts || '').startsWith('failed') ? 'couldn’t fetch classes' : 'failed';
+      warnings.push(`<div class="otf-warn">Last sync, ${escapeHTML(otfWhen(attempt.at))}: ${reason}.${
+        data ? ` Showing data from ${escapeHTML(otfWhen(data.fetched_at))}.` : ''}</div>`);
+    } else if (data) {
+      const ageH = (Date.now() - new Date(data.fetched_at)) / 3600000;
+      if (!(ageH <= (CONFIG.otf?.staleHours || 36))) {
+        warnings.push(`<div class="otf-warn">Not updated since ${escapeHTML(otfWhen(data.fetched_at))}.</div>`);
+      }
+    }
+    // Fetched, but OTF changed something and a class didn't come through.
+    const parse = attempt?.ok ? attempt.sources?.parse : null;
+    if (parse && parse !== 'ok') {
+      warnings.push(`<div class="otf-warn otf-warn-soft">Partial: ${escapeHTML(parse)}.</div>`);
+    }
+
+    if (!data) {
+      el.innerHTML = warnings.join('') || `<div class="otf-empty">No Orangetheory data yet.</div>`;
+      if (badge) badge.textContent = '—';
+      return;
+    }
+
+    const last = (data.workouts || []).find(w => w.attended);
+    const month = data.month || {};
+    if (badge) {
+      const mon = month.key
+        ? dateAtNoon(`${month.key}-01`).toLocaleDateString('en-US', { month: 'short', timeZone: 'UTC' })
+        : '';
+      badge.textContent = month.key ? `${month.classes || 0} in ${mon}` : '—';
+    }
+
+    el.innerHTML = `
+      ${warnings.join('')}
+      ${last ? otfLastClassHTML(last)
+        : `<div class="otf-empty">No classes in the last ${data.days || 45} days.</div>`}
+      ${month.key ? otfMonthHTML(month) : ''}`;
+  }
+}
+
+// ── Orangetheory workout thread ────────────────────────────────────────
 // Reddit blocks programmatic reads of its JSON endpoints (search.json returns
 // "blocked by network security" even from a plain browser tab), so there's no
 // way to fetch the daily thread. A Worker proxy wouldn't help — the block is
 // on Reddit's side, not the browser's. Sanctioned route is their OAuth API,
 // which isn't worth a client secret for one link.
 //
-// So: a static link. No fetch, no failure mode. It can't tell you whether the
-// thread is up, but it saves the hunt for it.
+// So: a static link, at the foot of the Orangetheory card. No fetch, no
+// failure mode, and it renders even when the card is locked or failing.
 
 function renderWorkout() {
   const el = $('workout-content');
@@ -786,6 +962,7 @@ function loadLiveData() {
   loadSports();
   loadCalendar();
   loadTasks();
+  loadOtf();
   loadDevotion();
   loadOnThisDay();
   loadBriefing(); // handles both briefing and sit-with

@@ -484,8 +484,95 @@
       vertical-align: middle;
     }
 
-    /* ── WORKOUT — a footer line on the Today card ── */
-    .cal-footer {
+    /* ── ORANGETHEORY ── */
+    /* OTF's own zone colors, toned to sit in the warm palette. */
+    .otf-warn {
+      font-size: 11.5px;
+      color: var(--neg);
+      line-height: 1.4;
+      margin-bottom: 10px;
+    }
+    .otf-warn-soft { color: var(--warn); }
+    .otf-when {
+      font-size: 12.5px;
+      color: var(--ink-2);
+      margin-bottom: 8px;
+    }
+    .otf-when-day { font-weight: 600; }
+    .otf-nodata { font-size: 12.5px; color: var(--ink-3); font-style: italic; }
+    .otf-stats {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+    }
+    .otf-num {
+      font-family: var(--mono);
+      font-size: 19px;
+      line-height: 1.1;
+      color: var(--ink);
+      letter-spacing: -0.02em;
+      font-variant-numeric: tabular-nums;
+    }
+    .otf-unit { font-size: 10.5px; color: var(--ink-4); margin-top: 2px; }
+    .otf-zones {
+      display: flex;
+      height: 6px;
+      border-radius: 3px;
+      overflow: hidden;
+      margin-top: 12px;
+      background: var(--bg-3);
+    }
+    .otf-zones i { display: block; height: 100%; }
+    .otf-zone-mins {
+      display: flex;
+      justify-content: space-between;
+      font-family: var(--mono);
+      font-size: 10px;
+      color: var(--ink-4);
+      margin-top: 4px;
+    }
+    .otf-zone-mins b { font-weight: 500; }
+    .z-gray   { --z: oklch(0.760 0.006 70); }
+    .z-blue   { --z: oklch(0.620 0.110 245); }
+    .z-green  { --z: oklch(0.600 0.130 150); }
+    .z-orange { --z: oklch(0.700 0.160 55); }
+    .z-red    { --z: oklch(0.570 0.190 27); }
+    .otf-zones i[class^="z-"] { background: var(--z); }
+    .otf-zone-mins b[class^="z-"] { color: var(--z); }
+    .otf-month {
+      border-top: 1px solid var(--line);
+      margin-top: 12px;
+      padding-top: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .otf-goal {
+      display: grid;
+      grid-template-columns: 38px 1fr auto;
+      align-items: center;
+      gap: 8px;
+      font-size: 11.5px;
+      color: var(--ink-3);
+    }
+    .otf-bar {
+      height: 5px;
+      border-radius: 3px;
+      background: var(--bg-3);
+      overflow: hidden;
+    }
+    .otf-bar i { display: block; height: 100%; background: var(--accent); }
+    .otf-goal-met .otf-bar i { background: var(--pos); }
+    .otf-goal-num {
+      font-family: var(--mono);
+      font-size: 10.5px;
+      color: var(--ink-3);
+      font-variant-numeric: tabular-nums;
+    }
+    .otf-empty { font-size: 12.5px; color: var(--ink-3); font-style: italic; }
+
+    /* ── WORKOUT THREAD — the footer line on the Orangetheory card ── */
+    .card-footer {
       border-top: 1px solid var(--line);
       margin-top: 10px;
       padding-top: 10px;
@@ -509,8 +596,6 @@
       color: var(--ink-4);
     }
     /* ── ON THIS DAY ── */
-    /* Sized to its own content beside the tasks card, not stretched to it. */
-    .otd-card { align-self: start; }
     .otd-items { display: flex; flex-direction: column; gap: 0; }
     .otd-item {
       padding: 8px 0;
@@ -588,6 +673,9 @@
       gap: var(--gap);
     }
     .rail > .card { grid-column: auto; }
+    /* Below the band, each column is sized to its own content. Neither
+       stretches to the other's height. */
+    .rail-lower, .tasks-card { align-self: start; }
 
     /* ── Briefing at reading size ── */
     .briefing-summary { font-size: 19px; line-height: 1.6; }
@@ -738,8 +826,12 @@
       .col-7 { grid-column: span 12; }
       .rail  { grid-column: span 12; flex-direction: row; }
       .rail > .card { flex: 1; }
+      /* The lower rail stays a column beside Treasurer tasks until 900. */
+      .rail.rail-lower { grid-column: span 4; flex-direction: column; }
+      .rail-lower > .card { flex: none; }
     }
     @media (max-width: 900px) {
+      .rail.rail-lower { grid-column: span 12; }
       .col-4, .col-5, .col-6, .col-7, .col-8 { grid-column: span 12; }
       .rail { flex-direction: column; }
       .sit-hero .sit-inner { flex-direction: column; align-items: flex-start; gap: 18px; }
@@ -815,7 +907,6 @@
         <div class="cal-items" id="cal-content">
           <div class="loading">Google Calendar not connected yet.</div>
         </div>
-        <div class="cal-footer" id="workout-content"></div>
       </div>
 
       <div class="card">
@@ -858,7 +949,7 @@
     <div class="band">The rest of the morning</div>
 
     <!-- ── TREASURER TASKS (col 8) ── -->
-    <div class="card col-8">
+    <div class="card col-8 tasks-card">
       <div class="card-label">
         Treasurer tasks
         <span class="card-label-badge" id="tasks-badge">—</span>
@@ -868,10 +959,25 @@
       </div>
     </div>
 
-    <!-- ── ON THIS DAY (col 4) ── -->
-    <div class="card col-4 otd-card">
-      <div class="card-label">On this day</div>
-      <div class="otd-items" id="otd-content"></div>
+    <!-- ── LOWER RAIL: Orangetheory, on this day (col 4) ── -->
+    <div class="rail rail-lower">
+
+      <div class="card otf-card">
+        <div class="card-label">
+          Orangetheory
+          <span class="card-label-badge" id="otf-badge">—</span>
+        </div>
+        <div id="otf-content">
+          <div class="loading">Loading…</div>
+        </div>
+        <div class="card-footer" id="workout-content"></div>
+      </div>
+
+      <div class="card otd-card">
+        <div class="card-label">On this day</div>
+        <div class="otd-items" id="otd-content"></div>
+      </div>
+
     </div>
 
   </div><!-- /grid -->

@@ -25,11 +25,25 @@ const CONFIG = {
     maxLeague: 3,   // league filler cap — keeps the card from outgrowing the briefing
   },
 
-  // ── Orangetheory daily workout ──────────────
-  // Just a link. Reddit blocks reading its data endpoints, so the dashboard
-  // can't tell you whether today's thread is up — only take you to the sub.
+  // ── Orangetheory daily workout thread ───────
+  // Just a link, at the foot of the Orangetheory card. Reddit blocks reading
+  // its data endpoints, so the dashboard can't tell you whether today's
+  // thread is up — only take you to the sub.
   workout: {
     subreddit: "orangetheory",
+  },
+
+  // ── Orangetheory card ───────────────────────
+  // Monthly goals in miles. Tread 32 is the usual target; rower is a bonus.
+  // To change one month, add a line like:
+  //     "2026-12": { tread: 28, rower: 15 },
+  // The card converts rower meters to miles at 1609.344 m per mile.
+  otf: {
+    url: "https://briefing.clintsievers.workers.dev/otf",
+    staleHours: 36,   // older than this, the card says when it last updated
+    goals: {
+      default: { tread: 32, rower: 15 },
+    },
   },
 
   // ── Something to sit with ────────────────────

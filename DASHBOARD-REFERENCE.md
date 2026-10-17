@@ -1,6 +1,6 @@
 # Morning Dashboard — Architecture Reference
 
-Last updated: October 14, 2026
+Last updated: October 17, 2026
 
 ## What this is
 A personal morning dashboard for Clint Sievers, hosted on GitHub Pages. Plain HTML/CSS/JS — no framework, no build step. It exists to replace aimless scrolling with a purposeful briefing.
@@ -9,6 +9,7 @@ A personal morning dashboard for Clint Sievers, hosted on GitHub Pages. Plain HT
 **Repository:** `github.com/clints81/dashboard`
 **Worker:** `briefing.clintsievers.workers.dev` (deployed separately by pasting into the Cloudflare editor — but its source now lives in the repo as `worker.js`)
 **Briefing Worker:** `briefing-retrieval.clintsievers.workers.dev` (source in `briefing-retrieval/`, deployed with `npm run deploy` from that folder)
+**Orangetheory sync:** `github.com/clints81/otf-sync`, a **private** repo whose scheduled GitHub Action PUTs workout data to the Worker (see The Orangetheory card)
 
 Repo files:
 - `index.html` — structure and design (edit rarely)
@@ -37,13 +38,15 @@ It serves these routes:
 | `/calendar` | GET | Parses ICS calendar feeds (`env.CAL_ICS_1` / `CAL_ICS_2`) for today's events. **Requires `X-Read-Key`.** CORS `*`. 5-min cache. |
 | `/tasks` | GET | Queries the JELC treasurer Notion database (`env.NOTION_TOKEN`) for what's due and recently settled. **Requires `X-Read-Key`.** CORS `*`. 5-min cache. |
 | `/devotion` | GET | Fetches the WELS Daily Devotions RSS feed and extracts verse, reference, title, excerpt. No secret. CORS `*`. 3-hr cache. |
+| `/otf` | PUT | Stores the otf-sync payload in KV (key `otf-sync`). Requires `X-Write-Key`, same key as `/`. A failed sync keeps the last good data. See The Orangetheory card. |
+| `/otf` | GET | Last good Orangetheory data plus the last sync attempt. **Requires `X-Read-Key`.** CORS `*`. 5-min cache, dropped on every PUT. |
 
-The write key is `WRITE_KEY` in this Worker's Cloudflare settings, with copies in 1Password and as the `DASHBOARD_WRITE_KEY` secret on the `briefing-retrieval` Worker. It was rotated 2026-10-08, when it came out of the Cowork task text. Never in the repo. The other secrets (`CAL_ICS_1`, `NOTION_TOKEN`, `READ_KEY`) live in Cloudflare → Settings → Variables and Secrets, separate from the code editor.
+The write key is `WRITE_KEY` in this Worker's Cloudflare settings, with copies in 1Password, as the `DASHBOARD_WRITE_KEY` secret on the `briefing-retrieval` Worker, and as the `DASHBOARD_WRITE_KEY` Actions secret in `otf-sync`. Rotating it means updating all three. It was rotated 2026-10-08, when it came out of the Cowork task text. Never in the repo. The other secrets (`CAL_ICS_1`, `NOTION_TOKEN`, `READ_KEY`) live in Cloudflare → Settings → Variables and Secrets, separate from the code editor.
 
-Each route is one top-level name in `worker.js` (`handleSports`, `CALENDAR`, `TASKS`, `DEVOTION`, `SITWITH`) plus one line in the `fetch` router. Follow that convention when adding a route — it's what keeps per-route constants (each block has its own `CACHE_SECONDS`) from colliding.
+Each route is one top-level name in `worker.js` (`handleSports`, `CALENDAR`, `TASKS`, `DEVOTION`, `SITWITH`, `OTF`) plus one line in the `fetch` router. Follow that convention when adding a route — it's what keeps per-route constants (each block has its own `CACHE_SECONDS`) from colliding.
 
 ### Read key
-`/calendar` and `/tasks` return Clint's schedule and the church's payables, so they need a read key. Every other route stays public, `/sitwith` included: the picks aren't personal, and the computer bookmark should show them without a key.
+`/calendar`, `/tasks` and `/otf` return Clint's schedule, the church's payables and his workout data, so they need a read key. Every other route stays public, `/sitwith` included: the picks aren't personal, and the computer bookmark should show them without a key.
 
 Where the key lives:
 - `READ_KEY` secret in this Worker's Cloudflare settings
@@ -55,7 +58,7 @@ Never in the repo. The page sends it as `X-Read-Key`.
 How it behaves:
 - **Worker.** `READ_GATE.check()` runs after OPTIONS (preflights never carry the key) and **before the cache lookup**, so a request without the key can never be served a cached copy. No key gets 401 `{"error":"locked","sources":{"auth":"missing"}}`, a wrong key gets `"rejected"`, and an unset `READ_KEY` fails closed with 500 `"READ_KEY unset"`. Refusals carry the CORS headers; without them the browser hides the status and "locked" looks like a network failure.
 - **Caching.** The browser gets `cache-control: private, no-store`. The copy in `caches.default` keeps `public, max-age=300`, because `cache.put` refuses (413) a response whose Cache-Control says not to store it, and Cloudflare reads both `private` and `no-store` that way. `READ_GATE.forBrowser()` swaps the header on the way out.
-- **Page.** With no key stored, the card shows "Locked on this device · Enter key" and doesn't fetch. If the Worker answers 401, the card shows "Key rejected · Re-enter key". `fetchRetry` doesn't retry a 401. Any other failure keeps the card's normal "… unavailable" line. Saving a key reloads only these two cards.
+- **Page.** With no key stored, the card shows "Locked on this device · Enter key" and doesn't fetch. If the Worker answers 401, the card shows "Key rejected · Re-enter key". `fetchRetry` doesn't retry a 401. Any other failure keeps the card's normal "… unavailable" line. Saving a key reloads only the three protected cards.
 
 To rotate: set a new `READ_KEY` in Cloudflare, update 1Password, then re-enter the key on each device. Devices show "Key rejected" until you do.
 
@@ -77,12 +80,13 @@ History: while the briefing ran in Cowork, GitHub was ruled out as the delivery 
 - **Calendar** — Worker `/calendar` route. Today's events from Google/iCloud ICS feeds. See below.
 - **Treasurer tasks** — Worker `/tasks` route. JELC tasks from Notion. See below.
 - **Daily devotion** — Worker `/devotion` route. WELS Daily Devotions RSS. See below.
+- **Orangetheory** — Worker `/otf` route, filled by the otf-sync Action. See The Orangetheory card.
 
 All of these go through `fetchRetry()` in `app.js`: one retry after 2.5s, and a non-200 is treated as failure rather than parsed as JSON. The thrown error carries `.status`. A 401 is not retried, so the key-protected cards can tell "locked" from "broken".
 
 ### Static (config.js)
 - Fallback "something to sit with" (shown only if the briefing fetch fails)
-- Orangetheory subreddit name
+- Orangetheory subreddit name, and the monthly tread and rower goals (`CONFIG.otf.goals`)
 - Sports cap (`maxItems`)
 
 ---
@@ -251,7 +255,7 @@ Both logs need the Worker's Notion integration connected (page ⋯ → Connectio
 | Something to sit with | Worker `/` | config.js fallback; "Earlier this week" strip from `/sitwith` (Mon–Sat) |
 | Last week's reads | Worker `/sitwith` | Sundays only |
 | Your teams | Worker `/sports` | Team news, no scores |
-| Today's workout | Static link | See below |
+| Orangetheory | Worker `/otf` | Last class, month vs goal, workout-thread link; read key. See below |
 | Today (calendar) | Worker `/calendar` | Live; ICS feeds, Chicago time; read key |
 | Treasurer tasks | Worker `/tasks` | Live; JELC Notion, due + settled; read key |
 | Daily devotion | Worker `/devotion` | Live; WELS RSS, verse + excerpt |
@@ -263,10 +267,64 @@ The day-summary bar ("The goal before noon is one outreach"), Journal nudge, and
 ### Removed (Sept 1, 2026)
 Job search pipeline, JELS expansion, NYT Games. Markup, CSS, JS, and config all deleted.
 
-### Orangetheory: why it's a dumb link
-Reddit blocks programmatic reads of its JSON endpoints. `reddit.com/r/orangetheory/search.json` returns "blocked by network security" **even from a plain browser tab**. A Worker proxy does not help — the block is on Reddit's side, not the browser's. The sanctioned route is Reddit's OAuth API, which isn't worth a client secret for one link.
+## The Orangetheory card
 
-So the card is a static link. It can't tell you whether today's thread is up. It saves the hunt for it.
+Added 2026-10-17, replacing the static Reddit link. Two jobs: stop entering every class into Notion by hand, and help Clint prepare for class in the morning. Planned in the dashboard chat on 2026-10-17; Phase 1 is built, Phase 2 is in the Backlog.
+
+### Decisions
+- **Orangetheory's own data is the system of record.** It already holds the full history, so nothing is copied into Notion. A copy would be a second store to keep in sync.
+- **Nothing writes to Notion.** The Notion "OTF Class List" database (~1,387 classes) is frozen as an archive once Clint reaches class 1400, about a month out. He keeps entering by hand until then, on purpose.
+- **Notion's only future role** is holding what only Clint can supply: the r/orangetheory monthly post, pasted in once a month (Phase 2).
+- **Workout focus is dropped.** Clint's "Strength" tag meant the block focus, not a Strength 50 class. OTF doesn't publish focus in advance, and comparing a repeat to its own earlier template is already like-for-like.
+- **Target cost is $0.** otf-api is MIT-licensed, the Action runs ~3 times a day well inside the free 2,000 private-repo minutes, and there are no model calls.
+- **No manual override yet** (asked 2026-10-17: studio tech sometimes records wrong numbers). It's rare, the card shows one class and month totals, so a bad value shifts one glance and one month's sum. If it's ever needed: a small overrides file in the private otf-sync repo, keyed by class start time, that the job applies and the card marks as corrected. Not Notion, per the decision above. In the Backlog.
+
+### otf-sync (where the code runs)
+otf-api is Python and logs in through OTF's AWS Cognito pool, caching tokens and a device key on disk. Neither Worker can host that (JS, free plan, no disk, ~10ms CPU). So it runs as a **scheduled GitHub Action in the private repo `clints81/otf-sync`**. It's private because this dashboard repo is public and Action logs in a public repo are public. Its `CLAUDE.md` forbids printing workout data or credentials to the log; the job prints counts and statuses only and silences otf-api's logger, which logs raw responses and the account email on some error paths.
+
+- **Secrets** (Actions secrets, copies in 1Password): `OTF_EMAIL`, `OTF_PASSWORD`, `DASHBOARD_WRITE_KEY`.
+- **Schedule** (UTC cron, can start late): 08:40, 15:40, 23:40 UTC, i.e. 3:40am, 10:40am and 6:40pm CDT (an hour earlier in CST). The first keeps the morning fresh; the other two pick up a class the same day. Also runnable by hand (workflow_dispatch).
+- **Pinned:** otf-api 0.21.1 and every dependency, in `requirements.txt`. Upgrading otf-api is its own change.
+- **`TZ: America/Chicago` on the runner** is load-bearing: otf-api compares class start times (studio local, no zone) with the machine's clock, and a UTC runner would count a class later today as already done.
+- **Login: refresh token first, password only as a fallback.** Verified 2026-10-17 by reading otf-api and a one-off probe: otf-api never sends the cached device key with a password login, so each password login registers a new Cognito device; and it caches tokens for about an hour only, so runs hours apart would all be password logins. So `sync.py` keeps its own copy of the tokens (`~/.cache/otf-sync/tokens.json`) and refreshes with the cached device key. The probe confirmed the refresh works. Whether devices were piling up can't be seen from our side: Cognito's device list came back empty even right after a login. Each run reports which path it used (`sources.login`: `ok (refresh)` or `ok (password; refresh: …)`); the first password fallback will show OTF's refresh-token lifetime.
+- **Login state between runs** is saved with `actions/cache` (both `~/.cache/otf-api` and `~/.cache/otf-sync`), one entry per run, restored newest-first by prefix. It holds a live refresh token, another reason the repo stays private.
+
+### The payload
+`PUT /otf` with `{attempted_at, ok, sources, data?}`. `ok` is false when the login or the workout fetch failed, and then there's no `data`.
+
+- `sources`: `login`, `workouts` (`ok (N)` or `failed: <type>`), `parse`, `benchmarks`, `month_stats`, and `new_class_types` when OTF sent a class type otf-api doesn't know (see below). **`parse` is the "fetched but didn't parse" check.** otf-api drops a booking it can't read (a new class type, a renamed field) and only logs it, which would read as "no class". The job compares raw bookings, parsed bookings and workouts over the same window and reports any gap, e.g. `1 of 33 bookings didn't parse`.
+- `data.workouts`: the last 45 days (so a repeat's original is included), newest first. Per class: `start` (studio local, no zone), `type`, `name`, `coach`, `attended`, `has_data`, `splats`, `calories`, `steps`, `avg_hr`, `peak_hr`, `zones` (whole minutes), `tread` {`miles`, `avg_mph`, `max_mph`, `elev_ft`}, `rower` {`meters`, `pace_500m`, `watts`}.
+- `data.month`: `key` (YYYY-MM, Chicago), `classes`, `tread_miles`, `rower_meters`, summed from the classes, plus OTF's own month totals as `otf_reported`, a cross-check only (they carry no units).
+- `data.benchmarks`: each benchmark with OTF's ID, name, unit, best/last/previous and the last 10 dated results. Body-weight challenges (unit `lb`) are left out.
+
+Fields that don't mean what they seem (verified 2026-10-17):
+- **`peak_hr`, not `max_hr`.** otf-api's `max_hr` is the member's configured maximum. The highest heart rate in the class, Notion's "Max heart rate", is `peak_hr`.
+- **Numbers come from OTF's display values** (`"2.41"` miles, `"1,250"` m), the numbers the app shows and Clint copied into Notion, so month sums match the old Notion totals. Units the probe saw: tread miles, mph, feet; rower m, min/500m, watts.
+- **The class type is a reliable field; 2G/3G is not.** otf-api knows ORANGE_60, ORANGE_90, STRENGTH_50, TREAD_50 and OTHER. 2G vs 3G exists only in the name ("Orange 60 Min 2G"). Clint's studio names are consistent (120 days: 53 × 2G, 2 × 3G, 1 Tornado, 10 Strength 50, 2 Tread 50).
+- **OTF has more class types than otf-api knows.** The first dry run (2026-10-17) reported `1 of 25 bookings didn't parse`: a Hyrox class, type `HYROX_60`, which otf-api 0.21.1 (the newest) rejects, dropping the whole class. So `sync.py` reads an unknown type as OTHER before otf-api parses it, keeps OTF's real value in the payload's `type`, and lists it in `sources.new_class_types`. The card labels such a class by its name. The `parse` check stays for any other kind of breakage.
+- **A class can have no data.** Phone left at home: attended, no performance summary. The card says "Attended · nothing recorded".
+- **Benchmark names don't match the monthly post** ("12 MIN Treadmill" vs "12 Minute Tread for Distance"). Phase 2 matches on OTF's benchmark ID through a small hand-made table, not on names. The list also covers specialty workouts (Orange Everest, Inferno, Catch Me If You Can), which Clint tracks the same way.
+- **"12 MIN Treadmill" reports its unit as km** though the app shows miles. Check one result against Notion's Benchmark info before converting (Phase 2).
+
+### Storage and route
+KV key `otf-sync` in `env.BRIEFING` (named so it can't collide with `latest` or `sitwith-archive`), holding `{data, attempt}`. A failed sync updates `attempt` only, so the card keeps the last good numbers **and** says the sync failed. GET returns `{data, attempt, sources: {kv}}`, where `kv` is `ok`, `empty` (no sync yet), `unreadable` or `error: …`. Order inside the route: OPTIONS, then PUT (write key), then `READ_GATE.check()`, then the cache.
+
+### On the page
+Below "The rest of the morning", at the top of the 4-wide column beside Treasurer tasks, with On this day under it:
+- **Last class:** day, time, format, coach; splats, tread miles at average mph, rower meters; zone minutes as a thin bar in OTF's five colors with the minutes beneath.
+- **This month:** tread and rower miles against the goal, as two bars. Goals live in `config.js` (`CONFIG.otf.goals`): a default of tread 32 and rower 15, plus a line for any month Clint wants different. Tread 32 is his usual target; the rower goal is a bonus. The Notion "OTF Months" database held them before, set by hand each month (tread 25–35, rower always 15). The Notion formulas can't be read through the Notion connector, so the goals came from the Months rows, not the formula text. Rower miles = meters ÷ 1609.344.
+- **Badge:** classes this month ("11 in Oct").
+- **Never silently blank or stale:** a failed sync says so with its time and the date of the data shown; data older than 36h (`CONFIG.otf.staleHours`) says "Not updated since …"; a parse gap shows "Partial: …"; no sync yet says so. Locked and rejected key states work as on the other protected cards.
+- **Footer:** the r/orangetheory link, which stays (below).
+- `renderOtf` is split from the fetch inside `loadOtf`, and the states were checked against mocked payloads (good, failed login, stale, partial, no-data class, empty, unreadable, 401, 500).
+- Verified end to end before the first deploy (2026-10-17): two local dry runs of `sync.py`, the second logging in by refresh (`ok (refresh)`), 25 workouts, 20 benchmarks, `parse: ok` after the Hyrox fix.
+
+**Placement (Clint's call, 2026-10-17):** below the band, not in the top rail. He doesn't go every day, so he'd rather scroll to it than see it first. It also keeps the top rail at its old length: under Today it pushed the rail ~130px past the briefing on a quiet day. The lower column (`.rail-lower`) and the tasks card are each sized to their own content (`align-self: start`), so neither stretches to the other. Between 900 and 1000px wide the column stays beside tasks; under 900 everything stacks.
+
+### The workout-thread link (why it's still a link)
+Reddit blocks programmatic reads of its JSON endpoints. `reddit.com/r/orangetheory/search.json` returns "blocked by network security" **even from a plain browser tab**. A Worker proxy does not help — the block is on Reddit's side, not the browser's. The sanctioned route is Reddit's OAuth API, which isn't worth a client secret for one link. That decision stays closed: nothing reads Reddit programmatically. Clint reads the post himself, and in Phase 2 pastes the monthly post into Notion.
+
+So the thread is a static link, now the footer of the Orangetheory card. It can't tell you whether today's thread is up. It saves the hunt for it, and it renders even when the card is locked or failing.
 
 (For the record: the daily thread is generated the *evening before* and titled with the date it's for, so `created_utc` is the wrong field to filter on. The live thread is identified by mod-set **flair**, not by title — titles can't be edited on Reddit, flair can.)
 
@@ -310,6 +368,15 @@ Before filtering on any field, ask whether it carries the meaning you think it d
 - **Strategy Muse card**, behind the read key: a few lines (next milestones, hours against plan). The tracker is an Apps Script in the Strategy Muse Google account and can serve a minimal summary. The project plan is a Claude.ai artifact the Worker can't read, so it needs a copy that's refreshed whenever a workstream is fleshed out.
 - **Family calendar** in the `CAL_ICS_2` slot, waiting on sharing the family Apple calendar. Preferred over a school or community calendar.
 - **Delete the `/sitwith` SEED** in `worker.js` after Oct 21, 2026, once the archive itself covers a full week.
+- **Orangetheory October comparison** (Phase 1, item 4 of the brief; not yet run): for every class from Oct 1 to the end of manual entry, compare the API's zone minutes, calories, avg/peak HR, steps, tread miles, avg tread speed, rower meters and splats with OTF Class List, and give Clint a short mismatch report. Local and one-time; the report is never committed. Confirms each field means what the Notion field meant before he stops entering by hand.
+- **Orangetheory Phase 2: monthly post and preparation lookahead.** Waits on Phase 1 review.
+  - Input: a Notion page each month where Clint pastes, as-is, the r/orangetheory monthly post's Key Dates bullets (`October 19 (Monday): 500 Meter Row; benchmark.`, `October 24 (Saturday) - October 31 (Saturday): Hell Week; special event.`) and the repeat-templates line (`Repeat templates are as follows: 10/17 = 10/1, 10/18 = 10/2, ...`). "Other info" bullets only if cheap.
+  - otf-sync reads that page with its own Notion token, parses it, joins it with the workouts and adds the result to the same payload.
+  - Card: today is a repeat → show the original date's numbers (on 10/17, show 10/1). Today is a benchmark or specialty workout (Orange Everest, Inferno, Catch Me If You Can) → show the last result. Inside a special event → label it (replaces Notion's Special Note). Optionally one line for the next benchmark ("Mon 10/19 · 500m row").
+  - Parse failure is loud ("Couldn't read this month's repeats"), never an empty lookahead. The moderator may reword the post.
+  - Match benchmarks on OTF's ID via a hand-made table, not by name. Check the "12 MIN Treadmill" km unit against Notion before converting.
+  - Fallback if the API's history falls short: OTF Class List's "Benchmark info" text (`500m row: 1:29`), read once, not synced.
+- **Orangetheory override** for a class the studio recorded wrong: decided not yet (see The Orangetheory card).
 
 ---
 
@@ -323,7 +390,7 @@ Warm light theme. CSS custom properties in `:root` in `index.html`.
 
 Fonts: Geist (sans), Instrument Serif (display), Geist Mono (mono), via Google Fonts.
 
-Grid: 12-column, `var(--gap)` gutters. Briefing runs 8 wide; devotion/weather/today/teams stack in a 4-column rail (the workout link is a footer line on the Today card); the long-read card spans full width as a divider, with the "Earlier this week" strip at its foot Mon–Sat, or the full-width "Last week's reads" card under it on Sundays. Below "The rest of the morning", Treasurer tasks runs 8 wide with On this day 4 wide beside it. On this day is sized to its own content (`align-self: start`), not stretched to the tasks card's height. Under 900px everything stacks to full width; under 700px the strip goes to one column.
+Grid: 12-column, `var(--gap)` gutters. Briefing runs 8 wide; devotion/weather/today/teams stack in a 4-column rail; the long-read card spans full width as a divider, with the "Earlier this week" strip at its foot Mon–Sat, or the full-width "Last week's reads" card under it on Sundays. Below "The rest of the morning", Treasurer tasks runs 8 wide beside a 4-wide column holding Orangetheory, then On this day (the workout-thread link is the Orangetheory card's footer). Both sides are sized to their own content (`align-self: start`), not stretched to each other's height. Under 900px everything stacks to full width; under 700px the strip goes to one column.
 
 The rail should end near where the briefing does. It grows with calendar events and sports items, the briefing with story count — when adding a rail card, check both columns at 1194 wide on a full sports day, not just a quiet one.
 

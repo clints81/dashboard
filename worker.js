@@ -1187,6 +1187,113 @@ const SITWITH = (() => {
   return { record, handle };
 })();
 
+// ═══════════════════════════════════════════════════════════════════════
+//  /otf route — Orangetheory data from the otf-sync Action
+// ═══════════════════════════════════════════════════════════════════════
+//
+//  One top-level name — OTF — plus one router line below.
+//
+//  otf-sync (a scheduled GitHub Action in the private clints81/otf-sync
+//  repo) PUTs here with X-Write-Key, the same key as the briefing PUT.
+//  Its body: {attempted_at, ok, sources, data?}. `ok` is false when the
+//  login or the workout fetch failed, and then there's no `data`.
+//
+//  Storage: KV key "otf-sync" in env.BRIEFING, holding
+//  {data, attempt: {at, ok, sources}}. A failed run updates `attempt` only,
+//  so the card keeps the last good data AND says the sync failed. A failure
+//  must never look like "no classes this week".
+//
+//  GET is behind the read key, same order as /calendar and /tasks: OPTIONS,
+//  then READ_GATE.check(), then the cache. A PUT drops the cached copy.
+// ═══════════════════════════════════════════════════════════════════════
+
+const OTF = (() => {
+  const KEY = 'otf-sync';
+  const CACHE_SECONDS = 300;
+
+  const cors = {
+    'access-control-allow-origin': '*',
+    'access-control-allow-methods': 'GET, PUT, OPTIONS',
+    'access-control-allow-headers': 'X-Read-Key, X-Write-Key, Content-Type',
+    'content-type': 'application/json; charset=utf-8',
+  };
+  const reply = (status, obj) =>
+    new Response(JSON.stringify(obj), { status, headers: { ...cors, 'cache-control': 'no-store' } });
+
+  // { record, status }. A KV error throws; a value that isn't a JSON object
+  // comes back as status 'unreadable'.
+  async function read(env) {
+    const raw = await env.BRIEFING.get(KEY);
+    if (raw === null) return { record: null, status: 'empty' };
+    try {
+      const record = JSON.parse(raw);
+      if (record && typeof record === 'object') return { record, status: 'ok' };
+    } catch {}
+    return { record: null, status: 'unreadable' };
+  }
+
+  function valid(body) {
+    if (!body || typeof body !== 'object') return false;
+    if (typeof body.attempted_at !== 'string' || typeof body.ok !== 'boolean') return false;
+    if (!body.sources || typeof body.sources !== 'object') return false;
+    if (body.ok && (!body.data || typeof body.data.fetched_at !== 'string')) return false;
+    return true;
+  }
+
+  async function put(request, env) {
+    if (request.headers.get('X-Write-Key') !== env.WRITE_KEY) return reply(403, { error: 'forbidden' });
+    let body;
+    try { body = JSON.parse(await request.text()); } catch { return reply(400, { error: 'invalid JSON' }); }
+    if (!valid(body)) return reply(400, { error: 'expected {attempted_at, ok, sources, data?}' });
+
+    // A failed run keeps the previous data. An unreadable record is
+    // replaced: unlike the sit-with archive it holds nothing that isn't
+    // fetched again on the next good run.
+    let previous = null;
+    try { previous = (await read(env)).record; } catch {}
+    const record = {
+      data: body.ok ? body.data : (previous?.data ?? null),
+      attempt: { at: body.attempted_at, ok: body.ok, sources: body.sources },
+    };
+    await env.BRIEFING.put(KEY, JSON.stringify(record));
+    await caches.default.delete(new Request(new URL('/otf', request.url).toString(), { method: 'GET' }));
+    return reply(200, { ok: true, kept_previous: !body.ok });
+  }
+
+  async function handle(request, env) {
+    if (request.method === 'OPTIONS') return new Response(null, { headers: cors });
+    if (request.method === 'PUT') return put(request, env);
+
+    const locked = READ_GATE.check(request, env, cors);
+    if (locked) return locked;
+    if (request.method !== 'GET') return reply(405, { error: 'GET only' });
+
+    const cache = caches.default;
+    const cacheKey = new Request(new URL(request.url).toString(), { method: 'GET' });
+    const hit = await cache.match(cacheKey);
+    if (hit) return READ_GATE.forBrowser(hit);
+
+    // Same lesson as the other routes: nothing stored yet, a broken record
+    // and a KV error must not produce the same JSON.
+    let out;
+    try {
+      const { record, status } = await read(env);
+      out = { data: record?.data ?? null, attempt: record?.attempt ?? null, sources: { kv: status } };
+    } catch (e) {
+      out = { data: null, attempt: null, sources: { kv: `error: ${e.message}` } };
+    }
+    out.generated = new Date().toISOString();
+
+    const res = new Response(JSON.stringify(out), {
+      headers: { ...cors, 'cache-control': `public, max-age=${CACHE_SECONDS}` },
+    });
+    if (out.sources.kv === 'ok') await cache.put(cacheKey, res.clone());
+    return READ_GATE.forBrowser(res);
+  }
+
+  return { handle };
+})();
+
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
@@ -1195,6 +1302,7 @@ export default {
     if (url.pathname === '/tasks') return TASKS.handle(request, env);
     if (url.pathname === '/devotion') return DEVOTION.handle(request);
     if (url.pathname === '/sitwith') return SITWITH.handle(request, env);
+    if (url.pathname === '/otf') return OTF.handle(request, env);
 
     const cors = {
       "Access-Control-Allow-Origin": "*",
