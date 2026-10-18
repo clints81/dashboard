@@ -1,6 +1,6 @@
 # Morning Dashboard — Architecture Reference
 
-Last updated: October 17, 2026
+Last updated: October 18, 2026
 
 ## What this is
 A personal morning dashboard for Clint Sievers, hosted on GitHub Pages. Plain HTML/CSS/JS — no framework, no build step. It exists to replace aimless scrolling with a purposeful briefing.
@@ -41,7 +41,7 @@ It serves these routes:
 | `/otf` | PUT | Stores the otf-sync payload in KV (key `otf-sync`). Requires `X-Write-Key`, same key as `/`. A failed sync keeps the last good data. See The Orangetheory card. |
 | `/otf` | GET | Last good Orangetheory data plus the last sync attempt. **Requires `X-Read-Key`.** CORS `*`. 5-min cache, dropped on every PUT. |
 
-The write key is `WRITE_KEY` in this Worker's Cloudflare settings, with copies in 1Password, as the `DASHBOARD_WRITE_KEY` secret on the `briefing-retrieval` Worker, and as the `DASHBOARD_WRITE_KEY` Actions secret in `otf-sync`. Rotating it means updating all three. It was rotated 2026-10-08, when it came out of the Cowork task text. Never in the repo. The other secrets (`CAL_ICS_1`, `NOTION_TOKEN`, `READ_KEY`) live in Cloudflare → Settings → Variables and Secrets, separate from the code editor.
+The write key is `WRITE_KEY` in this Worker's Cloudflare settings, with copies in 1Password, as the `DASHBOARD_WRITE_KEY` secret on the `briefing-retrieval` Worker, and as the `DASHBOARD_WRITE_KEY` Actions secret in `otf-sync`. Rotating it means updating all three. It was rotated 2026-10-08, when it came out of the Cowork task text. Never in the repo. The other secrets (`CAL_ICS_1`, `CAL_ICS_2`, `NOTION_TOKEN`, `READ_KEY`) live in Cloudflare → Settings → Variables and Secrets, separate from the code editor.
 
 Each route is one top-level name in `worker.js` (`handleSports`, `CALENDAR`, `TASKS`, `DEVOTION`, `SITWITH`, `OTF`) plus one line in the `fetch` router. Follow that convention when adding a route — it's what keeps per-route constants (each block has its own `CACHE_SECONDS`) from colliding.
 
@@ -139,15 +139,42 @@ Scores are deliberately not shown. ESPN and The Athletic do that better, and sco
 
 ## The calendar route
 
-`/calendar` fetches ICS feeds (`env.CAL_ICS_1` = Google's secret iCal URL; `env.CAL_ICS_2` = an iCloud slot, wired and currently **unset**) and returns today's events. The browser can't do this itself — it can neither hold the secret URL nor fetch `calendar.google.com` cross-origin.
+`/calendar` fetches ICS feeds (`env.CAL_ICS_1` = Google's secret iCal URL; `env.CAL_ICS_2` = the family Apple calendar, **live since 2026-10-18**) and returns today's events. The browser can't do this itself — it can neither hold the secret URL nor fetch `calendar.google.com` cross-origin.
+
+**Adding an Apple feed:** Apple's share link is `webcal://…`. Change it to `https://…` before saving it as a secret; `webcal` is only a hint for calendar apps, and the Worker fetches over `https`. Family events merge into the same list as Google's for now; how they look on the card is a separate decision.
 
 Load-bearing details, learned the hard way:
 - **Times are wall-clock in `America/Chicago`, not UTC.** The block converts a zoned time to a UTC instant by guessing, measuring the error, and correcting (two passes settles DST boundaries). This is why a 9am standing meeting stays 9am after the November clock change.
 - **All-day events keep their raw `YYYYMMDD` date string.** Round-tripping them through a UTC instant is how all-day events end up on the wrong day. The date is the fact, not the timestamp.
 - **ICS lines fold** at 75 octets (a continuation line starts with space/tab); unfold before parsing or long titles arrive truncated.
-- The `sources` block reports each feed as `ok (N in file, M today)`, `unset`, `HTTP nnn`, `not-ics`, or `error: …` — same rule as `/sports`: a blocked feed and a genuinely empty day must not produce identical JSON.
+- The `sources` block reports each feed as `ok (N in file, M on YYYY-MM-DD)`, `unset`, `HTTP nnn`, `not-ics`, `empty-file`, or `error: …` — same rule as `/sports`: a blocked feed and a genuinely empty day must not produce identical JSON. Two counts are appended when they aren't zero, e.g. `ok (212 in file, 3 on 2026-10-18, 1 skipped, 2 fallback)`:
+  - **`skipped`**: events that couldn't be read (one threw while parsing or expanding, or had no usable `DTSTART`). **This is the one to watch**: without it, a dropped event and a free afternoon look identical. Counted across the whole file, because a broken event's date can't be known.
+  - **`fallback`**: events whose `TZID` is neither a standard zone name nor an offset label, shown as Chicago time. Also counted across the whole file.
+  - `N in file` counts every `VEVENT`, skipped ones included. `error: …` is now kept for real download and parse failures of the whole feed.
 - `?date=YYYY-MM-DD` points the route at another day, for verifying parsing without waiting for a morning.
 - Key-protected: send `X-Read-Key` (see Read key).
+- **One bad event never sinks the feed.** Each event is parsed and expanded on its own; a failure skips that event and counts it in `skipped`. Until 2026-10-18 one unreadable event threw out of the whole feed, and `sources` read `error: …` with no events at all.
+
+### Time zones (`TZID`)
+Added 2026-10-18. Apple exports zones it can't name as labels like `GMT-0500` and `GMT+0200` (events created while traveling). `Intl` throws on those, and the first iCloud fetch failed whole with `error: Invalid time zone specified: GMT-0500`.
+
+How a `TZID` is read (`resolveZone()` in the `CALENDAR` block):
+- **Standard zone name** (`America/New_York`, `US/Central`): as before, through `Intl`.
+- **Offset label** (`GMT±HHMM`, `GMT±HH:MM`, `UTC±…`, a bare `±HHMM`): a fixed offset, converted with plain arithmetic. Not `Intl` with an offset string, and not `Etc/GMT±N`, whose sign runs backwards.
+- **Anything else `Intl` rejects:** Chicago, counted as `fallback`.
+- No `TZID` and `Z` (UTC) times: unchanged.
+
+A recurring event repeats in its own zone, so a `GMT-0500` series keeps its offset and a New York series keeps New York wall-clock. Before, every series was expanded in Chicago. That gives the same times for US zones, which all change clocks on the same dates. Parameter values are read quote-aware, since a value holding a colon must be quoted (`TZID="GMT-05:00"`).
+
+**The principle: the stated offset is authoritative; our guess about intent is not.** What the family feed showed on 2026-10-18 (counts only, nothing from the file kept, and per-label counts left out because this repo is public): about 5,000 events, under 100 of them using one of 8 offset labels, `GMT-0500` the most common. Each label's `VTIMEZONE` defines a single fixed offset with no daylight rule. None of those events recur, and none are dated today or later. Run locally against the real feed, the new code reads `ok (… in file, 2 on 2026-10-18)`, with nothing skipped or fallen back.
+
+**Known DST tradeoff, accepted knowingly.** If Apple wrote `GMT-0500` but really meant Chicago, a new such event after the November 1 change shows an hour early (10:00 `GMT-0500` = 9:00 CST). No future event uses a label today. The Backlog has a check for after Nov 1.
+
+To verify after a deploy, `sources.icloud` should read `ok (…)`:
+
+```
+curl -H "X-Read-Key: …" "https://briefing.clintsievers.workers.dev/calendar?t=1"
+```
 
 ## The tasks route
 
@@ -393,10 +420,12 @@ Three separate bugs this week were the same shape: **a field that seemed to carr
 
 Before filtering on any field, ask whether it carries the meaning you think it does, or whether it's just a number that happens to be nearby. Authoritative beats inferred — mod-set flair beats a parsed timestamp, a publisher's slug beats a keyword in a description.
 
+A related shape (Oct 18): **a field that looks like a standard value but isn't, plus one bad record taking down a whole source.** Apple's `TZID=GMT-0500` looks like a zone name and isn't one, so `Intl` threw, and one event's throw emptied the whole family calendar. So check that a field holds the kind of value you assume, and contain failures per record: one bad record should cost that one record and be counted, not take the source with it.
+
 ---
 
 ## Backlog
-- ~~Google Calendar integration~~ — **done** via `/calendar`. Apple/iCloud still pending: the `CAL_ICS_2` slot is wired and unset (see Family calendar below).
+- ~~Google Calendar integration~~ — **done** via `/calendar`. The family Apple calendar is live in `CAL_ICS_2` too (2026-10-18).
 - ~~Notion church tasks~~ — **done** via `/tasks` (Treasurer tasks card).
 - JELC Council numbers (pulled from the JELC Council dashboard, not hand-maintained)
 - ~~Daily Bible verse~~ — **done** via `/devotion` (WELS Daily Devotions).
@@ -407,7 +436,7 @@ Before filtering on any field, ask whether it carries the meaning you think it d
 - ~~git for the Worker~~ — **done**, source is now `worker.js` in the repo. Consider wrangler too once it outgrows one editor screen (deploy is still a manual paste into the Cloudflare editor).
 - **Bible card:** this Sunday's lectionary readings (JELC follows the lectionary), spread across the week as references only, with no text, so it sends Clint to his Bible. Not the three-year reading plan.
 - **Strategy Muse card**, behind the read key: a few lines (next milestones, hours against plan). The tracker is an Apps Script in the Strategy Muse Google account and can serve a minimal summary. The project plan is a Claude.ai artifact the Worker can't read, so it needs a copy that's refreshed whenever a workstream is fleshed out.
-- **Family calendar** in the `CAL_ICS_2` slot, waiting on sharing the family Apple calendar. Preferred over a school or community calendar.
+- **Check family events on the card after Nov 1.** Rerun the `/calendar` curl on Nov 2 (see Time zones): `sources.icloud` should read `ok (…)`, and any family event with an offset label should show at the time Apple meant. If they're an hour off, the label meant Chicago after all, and the offset decision needs revisiting.
 - **Delete the `/sitwith` SEED** in `worker.js` after Oct 21, 2026, once the archive itself covers a full week.
 - **Orangetheory October comparison** (Phase 1, item 4 of the brief; not yet run, needs the full month): for every class from Oct 1 to the end of manual entry, compare the API's zone minutes, calories, avg/peak HR, steps, tread miles, avg tread speed, rower meters and splats with OTF Class List, and give Clint a short mismatch report. Local and one-time; the report is never committed. Confirms each field means what the Notion field meant before he stops entering by hand.
 - **Orangetheory override** for a class the studio recorded wrong: decided not yet (see The Orangetheory card).

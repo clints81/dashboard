@@ -341,14 +341,24 @@ const CALENDAR = (() => {
     .replace(/\\\\/g, '\\')
     .trim();
 
+  // A parameter value holding `:` or `;` must be quoted
+  // (TZID="GMT-05:00"), so split on the first colon outside quotes.
   function parseLine(line) {
-    const colon = line.indexOf(':');
+    let colon = -1, inQ = false;
+    const cuts = [];
+    for (let i = 0; i < line.length; i++) {
+      const c = line[i];
+      if (c === '"') inQ = !inQ;
+      else if (!inQ && c === ';') cuts.push(i);
+      else if (!inQ && c === ':') { colon = i; break; }
+    }
     if (colon === -1) return null;
-    const parts = line.slice(0, colon).split(';');
+    const bounds = [-1, ...cuts, colon];
+    const parts = bounds.slice(0, -1).map((b, i) => line.slice(b + 1, bounds[i + 1]));
     const params = {};
     for (const p of parts.slice(1)) {
       const eq = p.indexOf('=');
-      if (eq > -1) params[p.slice(0, eq).toUpperCase()] = p.slice(eq + 1);
+      if (eq > -1) params[p.slice(0, eq).toUpperCase()] = p.slice(eq + 1).replace(/^"(.*)"$/, '$1');
     }
     return { name: parts[0].toUpperCase(), params, value: line.slice(colon + 1) };
   }
@@ -398,6 +408,56 @@ const CALENDAR = (() => {
     return `${p.y}-${String(p.m).padStart(2, '0')}-${String(p.d).padStart(2, '0')}`;
   }
 
+  // ── Which zone a TZID means ──────────────────────────────────────────
+  // Apple exports zones it can't name as `GMT-0500`, `GMT+0200`. Intl
+  // throws on those, and before this one such event took down the whole
+  // feed. Checked against the family feed (2026-10-18): every GMT label's
+  // VTIMEZONE is a single fixed offset with no daylight rule, so the label
+  // is read as exactly that offset. The stated offset is authoritative; our
+  // guess that "GMT-0500" really meant Chicago is not. Arithmetic, not
+  // Etc/GMT±N, whose sign runs backwards.
+
+  const OFFSET_RE = /^(?:(?:GMT|UTC)([+-])(\d{1,2})(?::?(\d{2}))?|([+-])(\d{2}):?(\d{2}))$/i;
+
+  function fixedOffsetMinutes(tzid) {
+    const mt = tzid.match(OFFSET_RE);
+    if (!mt) return null;
+    const [sign, h, m] = mt[1] ? [mt[1], mt[2], mt[3]] : [mt[4], mt[5], mt[6]];
+    return (sign === '-' ? -1 : 1) * (+h * 60 + +(m || 0));
+  }
+
+  const ianaOk = new Map();
+  function isIana(tzid) {
+    if (!ianaOk.has(tzid)) {
+      try { dtf(tzid); ianaOk.set(tzid, true); } catch { ianaOk.set(tzid, false); }
+    }
+    return ianaOk.get(tzid);
+  }
+
+  // → { zone } for a named zone, { offset } (minutes east of UTC) for a
+  // fixed offset. A name that is neither falls back to Chicago, flagged so
+  // the event is counted in `sources`.
+  function resolveZone(tzid) {
+    const id = (tzid || '').replace(/^"|"$/g, '').trim();
+    if (!id) return { zone: TZ };
+    const offset = fixedOffsetMinutes(id);
+    if (offset !== null) return { offset };
+    if (isIana(id)) return { zone: id };
+    return { zone: TZ, fallback: true };
+  }
+
+  // The two conversions the parser and the expander need, for either kind.
+  const wallToUTC = (y, m, d, h, mi, s, z) => z.offset !== undefined
+    ? Date.UTC(y, m - 1, d, h, mi, s) - z.offset * 60000
+    : zonedToUTC(y, m, d, h, mi, s, z.zone);
+
+  const wallParts = (ms, z) => {
+    if (z.offset === undefined) return partsIn(ms, z.zone);
+    const t = new Date(ms + z.offset * 60000);
+    return { y: t.getUTCFullYear(), m: t.getUTCMonth() + 1, d: t.getUTCDate(),
+             h: t.getUTCHours(), mi: t.getUTCMinutes(), s: t.getUTCSeconds() };
+  };
+
   // All-day events keep their raw date string. Their timestamp is not the
   // fact; the date is. Round-tripping them through a UTC instant is how
   // all-day events end up rendering on the wrong day.
@@ -413,10 +473,14 @@ const CALENDAR = (() => {
     const mt = value.match(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})(Z)?$/);
     if (!mt) return null;
     const [, Y, M, D, h, mi, s, z] = mt;
+    if (z) return { allDay: false, zone: { zone: TZ }, ms: Date.UTC(+Y, +M - 1, +D, +h, +mi, +s) };
+    // `zone` rides along so a recurring event repeats in its own zone.
+    const zone = resolveZone(params.TZID);
     return {
       allDay: false,
-      ms: z ? Date.UTC(+Y, +M - 1, +D, +h, +mi, +s)
-            : zonedToUTC(+Y, +M, +D, +h, +mi, +s, params.TZID || TZ),
+      zone,
+      fallback: !!zone.fallback,
+      ms: wallToUTC(+Y, +M, +D, +h, +mi, +s, zone),
     };
   }
 
@@ -453,7 +517,10 @@ const CALENDAR = (() => {
       ? r.BYDAY.split(',').map(t => t.replace(/^[-+]?\d+/, '').toUpperCase())
       : null;
 
-    const base = partsIn(ev.start.ms, TZ);
+    // Repeat in the event's own zone: a `GMT-0500` series stays at its
+    // stated offset, a New York one at New York wall-clock.
+    const zone = ev.start.allDay ? { zone: TZ } : (ev.start.zone || { zone: TZ });
+    const base = wallParts(ev.start.ms, zone);
     const hits = [];
     let emitted = 0;
 
@@ -486,7 +553,7 @@ const CALENDAR = (() => {
         const y = dc.getUTCFullYear(), m = dc.getUTCMonth() + 1, d = dc.getUTCDate();
         const ms = ev.start.allDay
           ? zonedToUTC(y, m, d, 12, 0, 0, TZ)
-          : zonedToUTC(y, m, d, base.h, base.mi, base.s, TZ);
+          : wallToUTC(y, m, d, base.h, base.mi, base.s, zone);
 
         if (ms < ev.start.ms - 1000) continue;
         if (until !== null && ms > until) continue;
@@ -513,40 +580,62 @@ const CALENDAR = (() => {
 
   // ── Parse ────────────────────────────────────────────────────────────
 
+  // One bad event must not sink the feed. A line that throws marks its
+  // event bad, and the event is skipped and counted rather than aborting
+  // the parse. `vevents` counts every VEVENT, skipped ones included.
   function parseICS(text) {
     const events = [];
-    let cur = null;
+    let cur = null, vevents = 0, skipped = 0;
     for (const raw of unfold(text).split('\n')) {
       const line = raw.trim();
-      if (line === 'BEGIN:VEVENT') { cur = { exdates: new Set() }; continue; }
-      if (line === 'END:VEVENT') { if (cur) events.push(cur); cur = null; continue; }
-      if (!cur) continue;
+      if (line === 'BEGIN:VEVENT') { cur = { exdates: new Set() }; vevents++; continue; }
+      if (line === 'END:VEVENT') {
+        if (cur) {
+          // No usable DTSTART is a skip too: dropping it quietly is exactly
+          // the free-afternoon look-alike the count exists to expose.
+          if (cur.bad || !cur.start || !Number.isFinite(cur.start.ms)) skipped++;
+          else events.push(cur);
+        }
+        cur = null;
+        continue;
+      }
+      if (!cur || cur.bad) continue;
 
       const p = parseLine(line);
       if (!p) continue;
 
-      switch (p.name) {
-        case 'SUMMARY':  cur.summary = unescapeText(p.value); break;
-        case 'LOCATION': cur.location = unescapeText(p.value); break;
-        case 'STATUS':   cur.status = p.value.toUpperCase(); break;
-        case 'UID':      cur.uid = p.value; break;
-        case 'RRULE':    cur.rrule = p.value; break;
-        case 'DTSTART':  cur.start = parseDateValue(p.value, p.params); break;
-        case 'DTEND':    cur.end = parseDateValue(p.value, p.params); break;
-        case 'EXDATE':
-          for (const v of p.value.split(',')) {
-            const d = parseDateValue(v.trim(), p.params);
-            if (d) cur.exdates.add(d.allDay ? d.dateStr : dateStrIn(d.ms, TZ) + 'T' + d.ms);
-          }
-          break;
-        case 'RECURRENCE-ID': {
-          const d = parseDateValue(p.value, p.params);
-          if (d) cur.recurrenceId = d;
-          break;
+      try { applyProp(cur, p); } catch { cur.bad = true; }
+    }
+    return { events, vevents, skipped };
+  }
+
+  function applyProp(cur, p) {
+    switch (p.name) {
+      case 'SUMMARY':  cur.summary = unescapeText(p.value); break;
+      case 'LOCATION': cur.location = unescapeText(p.value); break;
+      case 'STATUS':   cur.status = p.value.toUpperCase(); break;
+      case 'UID':      cur.uid = p.value; break;
+      case 'RRULE':    cur.rrule = p.value; break;
+      case 'DTSTART':
+        cur.start = parseDateValue(p.value, p.params);
+        if (cur.start?.fallback) cur.fallback = true;
+        break;
+      case 'DTEND':
+        cur.end = parseDateValue(p.value, p.params);
+        if (cur.end?.fallback) cur.fallback = true;
+        break;
+      case 'EXDATE':
+        for (const v of p.value.split(',')) {
+          const d = parseDateValue(v.trim(), p.params);
+          if (d) cur.exdates.add(d.allDay ? d.dateStr : dateStrIn(d.ms, TZ) + 'T' + d.ms);
         }
+        break;
+      case 'RECURRENCE-ID': {
+        const d = parseDateValue(p.value, p.params);
+        if (d) cur.recurrenceId = d;
+        break;
       }
     }
-    return events.filter(e => e.start);
   }
 
   function eventsOnDay(text, dayStr, sourceLabel) {
@@ -554,22 +643,27 @@ const CALENDAR = (() => {
     const winStart = zonedToUTC(Y, M, D, 0, 0, 0, TZ);
     const winEnd   = zonedToUTC(Y, M, D + 1, 0, 0, 0, TZ);
 
-    const all = parseICS(text);
+    const parsed = parseICS(text);
+    let skipped = parsed.skipped;
+    const bad = new Set();
+    const skip = ev => { if (!bad.has(ev)) { bad.add(ev); skipped++; } };
 
     // A rescheduled instance arrives as its own VEVENT with the same UID
     // plus a RECURRENCE-ID naming the instance it replaces.
     const overrides = new Map();
-    for (const e of all) {
-      if (e.recurrenceId) {
+    for (const e of parsed.events) {
+      if (!e.recurrenceId) continue;
+      try {
         overrides.set(e.uid + '|' +
           (e.recurrenceId.dateStr || dateStrIn(e.recurrenceId.ms, TZ)), e);
-      }
+      } catch { skip(e); }
     }
+    const all = parsed.events.filter(e => !bad.has(e));
 
     const out = [];
     const seen = new Set();
 
-    const push = (ev, occ) => {
+    const push = (ev, occ, into) => {
       if (!occ) return;
       if (ev.status === 'CANCELLED') return;
       const day = occ.allDay ? occ.dateStr : dateStrIn(occ.ms, TZ);
@@ -577,10 +671,10 @@ const CALENDAR = (() => {
 
       const key = (ev.uid || ev.summary) + '|' + day + '|' + (occ.allDay ? 'all' : occ.ms);
       if (seen.has(key)) return;
-      seen.add(key);
 
       const dur = (ev.end && !occ.allDay) ? ev.end.ms - ev.start.ms : 0;
-      out.push({
+      into.push({
+        key,
         title: ev.summary || '(no title)',
         location: ev.location || null,
         allDay: occ.allDay,
@@ -592,20 +686,32 @@ const CALENDAR = (() => {
     };
 
     for (const ev of all) {
-      // RECURRENCE-ID says WHICH instance this replaces; DTSTART says when
-      // it now happens. Rendering the RECURRENCE-ID puts a rescheduled
-      // meeting back at its old time.
-      if (ev.recurrenceId) { push(ev, ev.start); continue; }
-      for (const occ of expand(ev, winStart, winEnd)) {
-        const day = occ.allDay ? occ.dateStr : dateStrIn(occ.ms, TZ);
-        if (overrides.has(ev.uid + '|' + day)) continue;
-        push(ev, occ);
+      // Each event is built into its own list and merged only if it got
+      // through whole, so one that throws halfway leaves nothing behind.
+      const mine = [];
+      try {
+        // RECURRENCE-ID says WHICH instance this replaces; DTSTART says when
+        // it now happens. Rendering the RECURRENCE-ID puts a rescheduled
+        // meeting back at its old time.
+        if (ev.recurrenceId) push(ev, ev.start, mine);
+        else for (const occ of expand(ev, winStart, winEnd)) {
+          const day = occ.allDay ? occ.dateStr : dateStrIn(occ.ms, TZ);
+          if (overrides.has(ev.uid + '|' + day)) continue;
+          push(ev, occ, mine);
+        }
+      } catch { skip(ev); continue; }
+      for (const { key, ...e } of mine) {
+        if (seen.has(key)) continue;
+        seen.add(key);
+        out.push(e);
       }
     }
     // `total` is how many VEVENTs the file contained at all. Without it,
     // "we downloaded a file we could not read" and "you have a free day"
-    // produce the same response.
-    return { events: out, total: all.length };
+    // produce the same response. `skipped` and `fallback` count across the
+    // whole file, not just the day: a skipped event's date can't be known.
+    const fallback = all.filter(e => e.fallback && !bad.has(e)).length;
+    return { events: out, total: parsed.vevents, skipped, fallback };
   }
 
   // ── Handler ──────────────────────────────────────────────────────────
@@ -613,7 +719,7 @@ const CALENDAR = (() => {
   async function build(env, dayStr) {
     const today = dayStr || dateStrIn(Date.now(), TZ);
 
-    // Two slots. The second is wired and empty, waiting on the iCloud URL.
+    // Two slots: Google, and the family Apple calendar (live since 2026-10-18).
     const feeds = [
       { label: 'google', url: env.CAL_ICS_1 },
       { label: 'icloud', url: env.CAL_ICS_2 },
@@ -631,11 +737,16 @@ const CALENDAR = (() => {
         if (!res.ok) { sources[feed.label] = `HTTP ${res.status}`; continue; }
         const text = await res.text();
         if (!text.includes('BEGIN:VCALENDAR')) { sources[feed.label] = 'not-ics'; continue; }
-        const { events: found, total } = eventsOnDay(text, today, feed.label);
+        const { events: found, total, skipped, fallback } = eventsOnDay(text, today, feed.label);
         events.push(...found);
+        // The skip count is the important one: without it, a dropped event
+        // and a free afternoon look identical. Zero counts are left out so
+        // a healthy feed reads as it always has.
+        const extra = (skipped ? `, ${skipped} skipped` : '')
+                    + (fallback ? `, ${fallback} fallback` : '');
         sources[feed.label] = total === 0
           ? 'empty-file'                      // downloaded, but nothing in it
-          : `ok (${total} in file, ${found.length} on ${today})`;
+          : `ok (${total} in file, ${found.length} on ${today}${extra})`;
       } catch (e) {
         sources[feed.label] = `error: ${e.message}`;
       }
