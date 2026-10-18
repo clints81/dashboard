@@ -18,8 +18,11 @@ Repo files:
 - `worker.js` — the Cloudflare Worker source (edit, commit, then paste into the Cloudflare editor and deploy)
 - `briefing-retrieval/` — the Worker that writes the briefing overnight; its own `README.md` and `DESIGN.md` (see The briefing system)
 - `DASHBOARD-REFERENCE.md` — this file
+- `briefs/` — briefs from the planning chat, **gitignored** (local only; see below)
 
 Everything in this repo is public and served by GitHub Pages. Secrets live in Cloudflare and 1Password, never here.
+
+**Briefs** (since 2026-10-18): a brief written in the planning chat is saved to `briefs/` for Claude Code to read. The folder is in `.gitignore` because briefs can hold private context (the calendar brief named the family calendar and a trip), and committing one would publish it. Briefs aren't kept in git at all: once one is built, its decisions and reasons live in this file, so the brief is disposable.
 
 ---
 
