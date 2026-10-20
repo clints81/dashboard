@@ -8,7 +8,7 @@ and publishes the briefing to the dashboard. Why things are built this
 way: [DESIGN.md](DESIGN.md).
 
 It lives in the dashboard repo but runs separately from the dashboard
-Worker (`briefing.clintsievers.workers.dev`, source in `../worker.js`) and
+Worker (`briefing.clintsievers.workers.dev`, source in `../dashboard-worker/`) and
 uses its own KV namespace (`briefing-pool`, not `briefing-store`). Nothing
 here can break the dashboard. Run the npm commands below from this folder.
 Until 2026-10-14 this was its own repo, `clints81/morning-briefing-retrieval`

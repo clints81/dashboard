@@ -1,0 +1,13 @@
+{
+  "name": "dashboard-worker",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "deploy": "wrangler deploy",
+    "dry-run": "wrangler deploy --dry-run",
+    "tail": "wrangler tail"
+  },
+  "devDependencies": {
+    "wrangler": "^4.147.0"
+  }
+}

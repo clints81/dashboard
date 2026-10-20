@@ -1,13 +1,13 @@
 # Morning Dashboard — Architecture Reference
 
-Last updated: October 18, 2026
+Last updated: October 20, 2026
 
 ## What this is
 A personal morning dashboard for Clint Sievers, hosted on GitHub Pages. Plain HTML/CSS/JS — no framework, no build step. It exists to replace aimless scrolling with a purposeful briefing.
 
 **Live URL:** `https://clints81.github.io/dashboard`
 **Repository:** `github.com/clints81/dashboard`
-**Worker:** `briefing.clintsievers.workers.dev` (deployed separately by pasting into the Cloudflare editor — but its source now lives in the repo as `worker.js`)
+**Worker:** `briefing.clintsievers.workers.dev` (source in `dashboard-worker/`, deployed with `npm run deploy` from that folder)
 **Briefing Worker:** `briefing-retrieval.clintsievers.workers.dev` (source in `briefing-retrieval/`, deployed with `npm run deploy` from that folder)
 **Orangetheory sync:** `github.com/clints81/otf-sync`, a **private** repo whose scheduled GitHub Action PUTs workout data to the Worker (see The Orangetheory card)
 
@@ -15,7 +15,7 @@ Repo files:
 - `index.html` — structure and design (edit rarely)
 - `config.js` — personal data layer (edit regularly, no coding required)
 - `app.js` — runtime logic and data fetching (edit for feature changes)
-- `worker.js` — the Cloudflare Worker source (edit, commit, then paste into the Cloudflare editor and deploy)
+- `dashboard-worker/` — the Cloudflare Worker: source in `src/index.js`, config in `wrangler.toml` (edit, commit, then `npm run deploy` from that folder)
 - `briefing-retrieval/` — the Worker that writes the briefing overnight; its own `README.md` and `DESIGN.md` (see The briefing system)
 - `DASHBOARD-REFERENCE.md` — this file
 - `briefs/` — briefs from the planning chat, **gitignored** (local only; see below)
@@ -28,7 +28,26 @@ Everything in this repo is public and served by GitHub Pages. Secrets live in Cl
 
 ## The Worker
 
-`briefing.clintsievers.workers.dev` is a Cloudflare Worker Clint owns. It is a single file that is deployed by pasting into the Cloudflare dashboard editor (not wrangler). The source now lives in the repo as **`worker.js`** — so the flow is: edit `worker.js`, commit, then paste the whole file into the Cloudflare editor and deploy. Git holds the history, so the old "keep a copy before editing" step is gone. **Never edit in the Cloudflare editor directly** — the deployed Worker and the repo would drift apart, and the next paste silently reverts the change.
+`briefing.clintsievers.workers.dev` is a Cloudflare Worker Clint owns, named `briefing`. Its source is **`dashboard-worker/src/index.js`** and its config is **`dashboard-worker/wrangler.toml`**. The flow: edit `src/index.js`, commit, then `npm run deploy` from `dashboard-worker/` (run `npm install` there once first).
+
+- **Never edit in the Cloudflare editor.** The deployed Worker and the repo would drift apart, and the next deploy silently reverts the change.
+- **Don't change bindings or variables in the Cloudflare dashboard either.** `wrangler.toml` is the whole config: a deploy removes any binding, variable or trigger that isn't in it. Change the file and deploy instead. Secrets are the exception: they aren't in the file and survive deploys (checked on the first deploy). Set them with `npx wrangler secret put <NAME>` from `dashboard-worker/`.
+- **The name must stay `briefing`.** `briefing-retrieval` reaches this Worker through two service bindings by that name, `COWORK` and `DASHBOARD`. The Cloudflare dashboard shows them on this Worker as a "briefing-retrieval (fetch)" trigger; they're configured in `briefing-retrieval/wrangler.toml`, not here.
+
+**Moved to wrangler on 2026-10-20.** Until then the Worker was a single file pasted into the Cloudflare editor. The move came first, on its own, because the next calendar change (replacing the hand-built parser with ical.js, in the Backlog) needs an npm import, which a pasted file can't do. Keeping the deploy change separate means a break after the parser change is the parser, not the deploy. The move was meant to change no behavior: the code moved byte-identical (`git mv` from `worker.js`, so `git log --follow` keeps its history), and `wrangler.toml` copies the live settings rather than new ones:
+
+| Setting | Value |
+|---|---|
+| Compatibility date / flags | `2026-08-30`, none (set when the Worker was made) |
+| Bindings | KV `BRIEFING` → `briefing-store` |
+| Secrets | `CAL_ICS_1`, `CAL_ICS_2`, `NOTION_TOKEN`, `READ_KEY`, `WRITE_KEY` |
+| Observability (Workers Logs) | on |
+| Triggers | `workers.dev` only: no routes, custom domains or crons |
+| Preview URLs | on (`preview_urls = true`, stated so it doesn't ride on wrangler's default) |
+
+Checked after the deploy: all five secrets still listed, and every GET route matched a baseline taken just before (status, CORS and cache headers, and the shape of each body), and the dashboard loaded with the key.
+
+If a deploy breaks something, `npx wrangler rollback` (or Deployments in the dashboard) restores the previous code, but may not restore a binding or variable a deploy removed. For that, put it back in `wrangler.toml` and deploy again.
 
 It serves these routes:
 
@@ -44,9 +63,9 @@ It serves these routes:
 | `/otf` | PUT | Stores the otf-sync payload in KV (key `otf-sync`). Requires `X-Write-Key`, same key as `/`. A failed sync keeps the last good data. See The Orangetheory card. |
 | `/otf` | GET | Last good Orangetheory data plus the last sync attempt. **Requires `X-Read-Key`.** CORS `*`. 5-min cache, dropped on every PUT. |
 
-The write key is `WRITE_KEY` in this Worker's Cloudflare settings, with copies in 1Password, as the `DASHBOARD_WRITE_KEY` secret on the `briefing-retrieval` Worker, and as the `DASHBOARD_WRITE_KEY` Actions secret in `otf-sync`. Rotating it means updating all three. It was rotated 2026-10-08, when it came out of the Cowork task text. Never in the repo. The other secrets (`CAL_ICS_1`, `CAL_ICS_2`, `NOTION_TOKEN`, `READ_KEY`) live in Cloudflare → Settings → Variables and Secrets, separate from the code editor.
+The write key is `WRITE_KEY` in this Worker's Cloudflare settings, with copies in 1Password, as the `DASHBOARD_WRITE_KEY` secret on the `briefing-retrieval` Worker, and as the `DASHBOARD_WRITE_KEY` Actions secret in `otf-sync`. Rotating it means updating all three. It was rotated 2026-10-08, when it came out of the Cowork task text. Never in the repo. The other secrets (`CAL_ICS_1`, `CAL_ICS_2`, `NOTION_TOKEN`, `READ_KEY`) are Worker secrets too, listed by name in `wrangler.toml`.
 
-Each route is one top-level name in `worker.js` (`handleSports`, `CALENDAR`, `TASKS`, `DEVOTION`, `SITWITH`, `OTF`) plus one line in the `fetch` router. Follow that convention when adding a route — it's what keeps per-route constants (each block has its own `CACHE_SECONDS`) from colliding.
+Each route is one top-level name in `dashboard-worker/src/index.js` (`handleSports`, `CALENDAR`, `TASKS`, `DEVOTION`, `SITWITH`, `OTF`) plus one line in the `fetch` router. Follow that convention when adding a route — it's what keeps per-route constants (each block has its own `CACHE_SECONDS`) from colliding.
 
 ### Read key
 `/calendar`, `/tasks` and `/otf` return Clint's schedule, the church's payables and his workout data, so they need a read key. Every other route stays public, `/sitwith` included: the picks aren't personal, and the computer bookmark should show them without a key.
@@ -436,11 +455,17 @@ A related shape (Oct 18): **a field that looks like a standard value but isn't, 
 - ~~Shorter, punchier briefing summaries~~ — **done**: one or two lines each since the move to `briefing-retrieval` (Oct 2026).
 - ~~Decide whether league fill earns its slots~~ — capped at 3, headline-only (Oct 2026). Revisit if the card feels thin.
 - Cleaner Worker URL via a `clintsievers.com` subdomain (deliberately deferred)
-- ~~git for the Worker~~ — **done**, source is now `worker.js` in the repo. Consider wrangler too once it outgrows one editor screen (deploy is still a manual paste into the Cloudflare editor).
+- ~~git for the Worker~~ — **done**; deployed with wrangler since 2026-10-20 (see The Worker).
 - **Bible card:** this Sunday's lectionary readings (JELC follows the lectionary), spread across the week as references only, with no text, so it sends Clint to his Bible. Not the three-year reading plan.
 - **Strategy Muse card**, behind the read key: a few lines (next milestones, hours against plan). The tracker is an Apps Script in the Strategy Muse Google account and can serve a minimal summary. The project plan is a Claude.ai artifact the Worker can't read, so it needs a copy that's refreshed whenever a workstream is fleshed out.
 - **Check family events on the card after Nov 1.** Rerun the `/calendar` curl on Nov 2 (see Time zones): `sources.icloud` should read `ok (…)`, and any family event with an offset label should show at the time Apple meant. If they're an hour off, the label meant Chicago after all, and the offset decision needs revisiting.
-- **Delete the `/sitwith` SEED** in `worker.js` after Oct 21, 2026, once the archive itself covers a full week.
+- **Delete the `/sitwith` SEED** in `dashboard-worker/src/index.js` after Oct 21, 2026, once the archive itself covers a full week.
+- **Replace the calendar parser with ical.js** (step 2 of the wrangler move; step 1 shipped 2026-10-20). The hand-built recurrence expander gets some repeating events wrong:
+  - It ignores `BYDAY` on monthly and yearly rules, so a "third Tuesday of the month" event repeats on a fixed day of the month instead. (`BYDAY` is only used on weekly rules, and its ordinal, the `3` in `3TU`, is dropped.)
+  - Day-31 rollover: a monthly rule on the 31st (or a yearly one on Feb 29) is built with `Date.UTC`, which rolls a missing day into the next month, so the event shows on e.g. Mar 3 instead of being skipped for that month.
+  - Rule parts it doesn't read at all (`BYMONTHDAY`, `BYSETPOS`, `BYMONTH` and others) are silently ignored.
+
+  Keep the `sources` counters (`skipped`, `fallback`), and add an `unsupported` count for rules that still can't be expanded, so a wrong or missing event can't look like a free day. Keep `resolveZone()`'s handling of offset labels. Test against known dates from the real feeds (`?date=`) before and after. Keep this file generic: no event names from the calendars.
 - **Orangetheory October comparison** (Phase 1, item 4 of the brief; not yet run, needs the full month): for every class from Oct 1 to the end of manual entry, compare the API's zone minutes, calories, avg/peak HR, steps, tread miles, avg tread speed, rower meters and splats with OTF Class List, and give Clint a short mismatch report. Local and one-time; the report is never committed. Confirms each field means what the Notion field meant before he stops entering by hand.
 - **Orangetheory override** for a class the studio recorded wrong: decided not yet (see The Orangetheory card).
 

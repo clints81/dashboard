@@ -1,0 +1,26 @@
+name = "briefing"
+main = "src/index.js"
+# Copied from the live Worker on 2026-10-20 (set when it was made in the
+# dashboard). No compatibility flags were set.
+compatibility_date = "2026-08-30"
+workers_dev = true
+# On in the dashboard before the move; stated here so it doesn't ride on
+# wrangler's default.
+preview_urls = true
+
+# This file is the whole config: a deploy removes any binding, variable or
+# trigger that isn't here. Don't change settings in the Cloudflare dashboard.
+# The name must stay "briefing": briefing-retrieval reaches this Worker
+# through two service bindings by that name (COWORK and DASHBOARD).
+
+# Briefing JSON (`latest`), the sit-with archive and otf-sync data.
+[[kv_namespaces]]
+binding = "BRIEFING"
+id = "ab2166e0a65047fda19e4cd9f4601ee8"
+
+# Workers Logs, on in the dashboard before the move.
+[observability]
+enabled = true
+
+# Secrets (set with `npx wrangler secret put <NAME>`, never committed):
+#   CAL_ICS_1, CAL_ICS_2, NOTION_TOKEN, READ_KEY, WRITE_KEY
