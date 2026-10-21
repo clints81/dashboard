@@ -1,6 +1,6 @@
 # Morning Dashboard — Architecture Reference
 
-Last updated: October 20, 2026
+Last updated: October 21, 2026
 
 ## What this is
 A personal morning dashboard for Clint Sievers, hosted on GitHub Pages. Plain HTML/CSS/JS — no framework, no build step. It exists to replace aimless scrolling with a purposeful briefing.
@@ -44,10 +44,20 @@ Everything in this repo is public and served by GitHub Pages. Secrets live in Cl
 | Observability (Workers Logs) | on |
 | Triggers | `workers.dev` only: no routes, custom domains or crons |
 | Preview URLs | on (`preview_urls = true`, stated so it doesn't ride on wrangler's default) |
+| Git builds | **none** (disconnected 2026-10-21, see below) |
 
 Checked after the deploy: all five secrets still listed, and every GET route matched a baseline taken just before (status, CORS and cache headers, and the shape of each body), and the dashboard loaded with the key.
 
 If a deploy breaks something, `npx wrangler rollback` (or Deployments in the dashboard) restores the previous code, but may not restore a binding or variable a deploy removed. For that, put it back in `wrangler.toml` and deploy again.
+
+### The Git build outage (2026-10-20 to 10-21)
+The `briefing` Worker was also connected to this GitHub repo through Cloudflare's Git builds (Settings → Build), which the pre-move check missed: it covered bindings, triggers, routes and observability, not Build. Pushing the move to `main` (5:46pm Central) started a build that ran wrangler at the repo root. With `worker.js` gone from the root and no `wrangler.toml` there, wrangler set the repo up as a **static site** and deployed it two minutes later: no Worker code, no `BRIEFING` binding, no secrets. `/` served the dashboard's own `index.html`, every other route was 404, and every Worker card failed overnight. Weather and On this day still loaded, since they don't use the Worker. That night's briefing PUT and otf-sync's 3:40am PUT failed; the KV data itself was untouched.
+
+Fixed 2026-10-21 about 9:14am Central: Clint rolled back to the last good version (`4596e16b`), which brought back the code, the binding and the secrets (a Worker version keeps its own copy of its secrets), and disconnected the Git build. **Keep Git builds off.** Deploys are a deliberate `npm run deploy`; a build on push would put every commit live, documentation-only ones included.
+
+The lesson: when checking that a config file matches what's live, the list to check is everything the dashboard can change, not just what the code uses. Ask for the whole Settings page.
+
+**Open, before the next deploy:** `wrangler secret list --name briefing` reads `[]` even though the live version has all five secrets (the unkeyed `/calendar` answers `locked`, not `READ_KEY unset`). The list appears to read the newest *uploaded* version, which is still the static one, and `wrangler deploy` carries secrets over from that version. If so, the next `npm run deploy` would go live with no secrets. In the Backlog.
 
 It serves these routes:
 
@@ -460,8 +470,10 @@ A related shape (Oct 18): **a field that looks like a standard value but isn't, 
 - **Strategy Muse card**, behind the read key: a few lines (next milestones, hours against plan). The tracker is an Apps Script in the Strategy Muse Google account and can serve a minimal summary. The project plan is a Claude.ai artifact the Worker can't read, so it needs a copy that's refreshed whenever a workstream is fleshed out.
 - **Check family events on the card after Nov 1.** Rerun the `/calendar` curl on Nov 2 (see Time zones): `sources.icloud` should read `ok (…)`, and any family event with an offset label should show at the time Apple meant. If they're an hour off, the label meant Chicago after all, and the offset decision needs revisiting.
 - **Delete the `/sitwith` SEED** in `dashboard-worker/src/index.js` after Oct 21, 2026, once the archive itself covers a full week.
+- **Restore the Worker's secrets as the newest version, before any deploy** (see The Git build outage). Without deploying: `npx wrangler versions upload` from `dashboard-worker/`, then `npx wrangler versions view <id>` to see whether the secrets carried over. If they didn't, Clint adds each one to that version with `npx wrangler versions secret put <NAME> --name briefing` (values from 1Password, typed at the hidden prompt), then `npx wrangler versions deploy <id>` and the usual route check. Done when `wrangler secret list` shows all five.
 - **Replace the calendar parser with ical.js** (step 2 of the wrangler move; step 1 shipped 2026-10-20). The hand-built recurrence expander gets some repeating events wrong:
   - It ignores `BYDAY` on monthly and yearly rules, so a "third Tuesday of the month" event repeats on a fixed day of the month instead. (`BYDAY` is only used on weekly rules, and its ordinal, the `3` in `3TU`, is dropped.)
+    Seen live on 2026-10-21: a monthly family-calendar entry that belongs on a Tuesday showed on Wednesday the 21st and not on Tuesday the 20th, and its Wednesday twin didn't show at all. Most likely a third-Tuesday series that started on a Tuesday the 21st. Reproduced with a made-up two-event feed (`FREQ=MONTHLY;BYDAY=3TU` from `20251021`, `BYDAY=3WE` from `20251015`): the current code puts each on its start date's day of the month. Use that pair as a test case.
   - Day-31 rollover: a monthly rule on the 31st (or a yearly one on Feb 29) is built with `Date.UTC`, which rolls a missing day into the next month, so the event shows on e.g. Mar 3 instead of being skipped for that month.
   - Rule parts it doesn't read at all (`BYMONTHDAY`, `BYSETPOS`, `BYMONTH` and others) are silently ignored.
 
