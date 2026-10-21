@@ -204,7 +204,7 @@ The parser is **ical.js 2.2.1** (pinned exactly in `dashboard-worker/package.jso
 - During the October–December sweep (two requests a second, old code live), 62 of 132 old-code `/calendar` requests were killed for CPU. The ones that got through used 224–1,041 ms.
 - A 50/50 split of live traffic between old and new, 30 keyed requests about 10 seconds apart: **new median 257 ms** (161–490, 17 requests), **old median 370 ms** (279–833, 12 requests). None killed. So the new parser uses about 30% less CPU, and it's still 25 times over the limit.
 
-The page's `fetchRetry` retries once, and responses are cached for 5 minutes, so in normal use this shows as an occasional "unavailable" calendar card, not a broken one. The fix is a plan decision, in the Backlog.
+The page's `fetchRetry` retries once, and responses are cached for 5 minutes, so in normal use this shows as an occasional "unavailable" calendar card, not a broken one. Staying on the Free plan and accepting that was Clint's call on 2026-10-21 (in the Backlog, to revisit).
 
 **Verified 2026-10-21 before deploying:**
 - `npm run test:calendar` passes.
@@ -516,7 +516,7 @@ Another (Oct 21): **a value that looks like a time but means something different
 - **Delete the `/sitwith` SEED** in `dashboard-worker/src/index.js` after Oct 21, 2026, once the archive itself covers a full week.
 - ~~Restore the Worker's secrets as the newest version~~ — **done** 2026-10-21 (see The Git build outage).
 - ~~Replace the calendar parser with ical.js~~ — **done** 2026-10-21 (see The calendar route).
-- **`/calendar` is over the Free plan's CPU limit** (see The calendar route, CPU). Every request uses hundreds of ms against a 10 ms limit, and some are killed with error 1102. Options: Workers Paid ($5/month), whose limit is far above what this needs and which would also cover every other route; or smaller savings in code, such as keeping ical.js's time-zone objects between requests instead of rebuilding them, which won't get near 10 ms with a 4 MB feed. A decision for Clint.
+- **`/calendar` is over the Free plan's CPU limit** (see The calendar route, CPU). Every request uses hundreds of ms against a 10 ms limit, and some are killed with error 1102. **Decided 2026-10-21: stay on the Free plan for now** and accept an occasional "unavailable" calendar card. Revisit if it starts failing often enough to matter; the fix then is Workers Paid ($5/month), whose limit is far above what this needs and which would cover every other route too. Smaller savings in code (such as keeping ical.js's time-zone objects between requests) won't get near 10 ms with a 4 MB feed.
 - **Orangetheory October comparison** (Phase 1, item 4 of the brief; not yet run, needs the full month): for every class from Oct 1 to the end of manual entry, compare the API's zone minutes, calories, avg/peak HR, steps, tread miles, avg tread speed, rower meters and splats with OTF Class List, and give Clint a short mismatch report. Local and one-time; the report is never committed. Confirms each field means what the Notion field meant before he stops entering by hand.
 - **Orangetheory override** for a class the studio recorded wrong: decided not yet (see The Orangetheory card).
 
