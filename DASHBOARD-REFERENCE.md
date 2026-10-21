@@ -96,7 +96,9 @@ How it behaves:
 - **Caching.** The browser gets `cache-control: private, no-store`. The copy in `caches.default` keeps `public, max-age=300`, because `cache.put` refuses (413) a response whose Cache-Control says not to store it, and Cloudflare reads both `private` and `no-store` that way. `READ_GATE.forBrowser()` swaps the header on the way out.
 - **Page.** With no key stored, the card shows "Locked on this device · Enter key" and doesn't fetch. If the Worker answers 401, the card shows "Key rejected · Re-enter key". `fetchRetry` doesn't retry a 401. Any other failure keeps the card's normal "… unavailable" line. Saving a key reloads only the three protected cards.
 
-To rotate: set a new `READ_KEY` in Cloudflare, update 1Password, then re-enter the key on each device. Devices show "Key rejected" until you do.
+To rotate: generate a new value in 1Password ("Dashboard read key"), run `npx wrangler secret put READ_KEY` from `dashboard-worker/` and paste it at the hidden prompt (this deploys a new version of the live code with the new key; the other secrets carry over), then re-enter the key on each device. Devices show "Key rejected" until you do.
+
+**Rotated 2026-10-21.** During the calendar testing, a helper script passed the key to `curl` as a command-line argument, and a process listing taken to check progress showed it in a Claude Code session transcript. It never reached a file or the repo, but it was treated as exposed. So: **scripts that use the read or write key pass it to `curl` through stdin** (`curl -K -` fed a `header = "X-Read-Key: …"` line), never as an argument, since any process listing shows arguments.
 
 ### Why a Worker exists at all
 The dashboard is served from `clints81.github.io`. Browsers refuse to let a page read a response from another origin unless that origin sends CORS headers saying it's allowed. Notion doesn't. `nytimes.com` doesn't. Server-side fetches aren't subject to that rule, so the Worker fetches on the dashboard's behalf and re-serves the result with `access-control-allow-origin: *`.
@@ -179,14 +181,50 @@ Scores are deliberately not shown. ESPN and The Athletic do that better, and sco
 
 **Adding an Apple feed:** Apple's share link is `webcal://…`. Change it to `https://…` before saving it as a secret; `webcal` is only a hint for calendar apps, and the Worker fetches over `https`. Family events merge into the same list as Google's for now; how they look on the card is a separate decision.
 
+### How an event gets onto a day (since 2026-10-21)
+The parser is **ical.js 2.2.1** (pinned exactly in `dashboard-worker/package.json`), with a strict split of work:
+
+- **ical.js decides which occurrences exist:** parsing, `RRULE` (including `BYDAY` ordinals, `BYSETPOS`, `BYMONTH`, `BYMONTHDAY`), and `EXDATE`.
+- **The Worker decides when they are.** Each occurrence comes back as wall-clock fields (year, month, day, hour, minute, second), and the Worker turns those plus the event's `TZID` into an instant with its own code: `resolveZone()`, then `wallToUTC()`. `Z` times are UTC; a time with no `TZID` and no `Z` is Chicago. End times are the event's own `DTEND` minus `DTSTART`, worked out the same way and added to each occurrence.
+
+**Why the split: the floating-time trap.** ical.js only knows a zone whose `VTIMEZONE` it has been given. Any other `TZID` becomes "floating", and ical.js reads a floating time in the runtime's own zone. A Worker runs in UTC, so a 10:00 Chicago event would come out at 10:00 UTC, 5am Chicago. On a Mac set to Chicago the same code gives the right answer, so a local test passes while the deployed Worker is five hours off. So **`toJSDate()`, `toUnixTime()` and `convertToZone()` are never called in the calendar code**, and the test script refuses to run unless `TZ=UTC`.
+
+**Why each event is parsed on its own.** `ICAL.parse` is all-or-nothing: one bad line anywhere (a line with no colon, `FREQ=SOMETIMES`, an unclosed `VEVENT`, an unmatched quote) throws for the whole file. That is the Oct 18 outage again, through a library. So the Worker cuts the file into one chunk per `VEVENT` and parses each in its own `try`. The `VTIMEZONE`s are cut out too and hung on one parent component that every event points to, so ical.js knows every zone the file defines. That matters for its `UNTIL` and `EXDATE` comparisons. As a backstop, the Worker also checks each `EXDATE` itself, as an instant: in a test, a UTC `EXDATE` on a series whose zone had no `VTIMEZONE` was silently ignored by ical.js.
+
+**Why there's a cheap pass first.** The family feed has about 5,000 events, and building ical.js objects for all of them costs seconds. Before anything is parsed, the raw lines decide whether an event could touch the target day: a one-off whose `DTSTART` date is within a day of it (the margin covers every zone offset), a series whose `UNTIL` isn't before that, or a moved instance whose new or original date is near it. A `DTSTART` the pass can't read keeps the event, so ical.js gets to fail on it and it's counted. With the pass, a request takes less CPU than the old parser did (see CPU below).
+
+**Repeats are bounded.** A rule with no `COUNT` and no `UNTIL` is legal and infinite, so each series stops once it passes the day, and a series that needs more than 4,000 steps to reach the day is counted in `skipped` (a daily series from 2000 would). The real feeds' longest active series needed about 18 steps on 2026-10-21.
+
+**What was wrong before** (the old hand-built expander, replaced 2026-10-21):
+- It ignored `BYDAY` on monthly and yearly rules, its ordinal (the `3` in `3TU`) and `BYSETPOS`, so a "third Tuesday" series repeated on the day of the month it started on. Seen live in October: a monthly third-Tuesday and third-Wednesday pair in the family calendar showed on the 21st and the 19th (the dates their first instances fell on) instead of the third Tuesday and Wednesday. A third-Friday meeting in Google showed on the 20th. The real feeds checked on 2026-10-21 had six such series wrong between October and December, including a second-Monday meeting and two household reminders with month-and-weekday rules. The rest were plain yearly dates, which the old code got right.
+- A monthly rule on the 31st rolled into the next month (Nov 31 became Dec 1) instead of skipping it.
+- An email reminder inside an event (`VALARM` with its own `SUMMARY:Alarm notification`) overwrote the event's title, so some Google events showed as "Alarm notification". ical.js reads the event's own `SUMMARY`.
+
+**CPU, and the Free plan's limit.** This account is on the Workers Free plan, whose limit is 10 ms of CPU per request. `/calendar` has never fit: the family feed is a 4 MB file of about 5,000 events going back years, and just unfolding and splitting it takes 15–30 ms before any parsing. Cloudflare lets a request overrun some of the time, and kills it with error 1102 ("Worker exceeded resource limits") at other times, more often under load. Measured 2026-10-21 from the live log (`wrangler tail`, which records `cpuTime` per request but not for preview URLs):
+- During the October–December sweep (two requests a second, old code live), 62 of 132 old-code `/calendar` requests were killed for CPU. The ones that got through used 224–1,041 ms.
+- A 50/50 split of live traffic between old and new, 30 keyed requests about 10 seconds apart: **new median 257 ms** (161–490, 17 requests), **old median 370 ms** (279–833, 12 requests). None killed. So the new parser uses about 30% less CPU, and it's still 25 times over the limit.
+
+The page's `fetchRetry` retries once, and responses are cached for 5 minutes, so in normal use this shows as an occasional "unavailable" calendar card, not a broken one. The fix is a plan decision, in the Backlog.
+
+**Verified 2026-10-21 before deploying:**
+- `npm run test:calendar` passes.
+- Old and new code run locally on downloads of both real feeds (in a scratch folder, deleted afterwards, never committed) for every day from Oct 1 to Dec 31: the only differences were the six repeating series above and the "Alarm notification" title.
+- The new code uploaded as a version without deploying, and `/calendar` fetched from live and from that version's preview URL back to back for each of the same 92 days: on the 62 days where both answered (the rest hit the CPU limit on one side), every difference was one of those expected fixes, and the `sources` lines matched exactly.
+
+Deployed as that exact version (`5e397d72`) with `wrangler versions deploy`. (The read-key rotation later that day made `01f3ecd3`: the same code with the new key.) The calendar card showed the corrected third-weekday series the same day.
+
+**Testing.** `npm run test:calendar` from `dashboard-worker/` runs `scripts/calendar-test.mjs` with `TZ=UTC`: a made-up feed through the Worker's real `/calendar` handler, checked day by day. It covers third-weekday rules both ways (`3TU` and `BYSETPOS=3`), a New York third-Friday on both sides of Nov 1, the 31st, `EXDATE`s (one in UTC on a zone with no `VTIMEZONE`), a moved instance, a `GMT-0500` event, a zone with no `VTIMEZONE`, an unknown zone, an all-day event, a cancelled event, and three unreadable ones. The old code fails it in the same ways the real calendars went wrong.
+
 Load-bearing details, learned the hard way:
 - **Times are wall-clock in `America/Chicago`, not UTC.** The block converts a zoned time to a UTC instant by guessing, measuring the error, and correcting (two passes settles DST boundaries). This is why a 9am standing meeting stays 9am after the November clock change.
-- **All-day events keep their raw `YYYYMMDD` date string.** Round-tripping them through a UTC instant is how all-day events end up on the wrong day. The date is the fact, not the timestamp.
-- **ICS lines fold** at 75 octets (a continuation line starts with space/tab); unfold before parsing or long titles arrive truncated.
+- **All-day events keep their date string**, built from the occurrence's year, month and day. Round-tripping them through a UTC instant is how all-day events end up on the wrong day. The date is the fact, not the timestamp.
+- **ICS lines fold** at 75 octets (a continuation line starts with space/tab); the file is unfolded before it's cut into events.
+- An event shows on the day it starts. A multi-day event doesn't repeat on its later days (unchanged from before).
 - The `sources` block reports each feed as `ok (N in file, M on YYYY-MM-DD)`, `unset`, `HTTP nnn`, `not-ics`, `empty-file`, or `error: …` — same rule as `/sports`: a blocked feed and a genuinely empty day must not produce identical JSON. Two counts are appended when they aren't zero, e.g. `ok (212 in file, 3 on 2026-10-18, 1 skipped, 2 fallback)`:
-  - **`skipped`**: events that couldn't be read (one threw while parsing or expanding, or had no usable `DTSTART`). **This is the one to watch**: without it, a dropped event and a free afternoon look identical. Counted across the whole file, because a broken event's date can't be known.
-  - **`fallback`**: events whose `TZID` is neither a standard zone name nor an offset label, shown as Chicago time. Also counted across the whole file.
-  - `N in file` counts every `VEVENT`, skipped ones included. `error: …` is now kept for real download and parse failures of the whole feed.
+  - **`skipped`**: events that couldn't be read: one that threw while parsing or expanding, had no usable `DTSTART`, hit the step cap, or was cut off mid-file. **This is the one to watch**: without it, a dropped event and a free afternoon look identical. Since ical.js, it counts the events the cheap pass let through (always every series, every moved instance near the day, and anything whose date can't be read) plus any broken `VEVENT`, not every event in the file: one the pass sets aside is never parsed, so it can't fail.
+  - **`fallback`**: events whose `TZID` is neither a standard zone name nor an offset label, shown as Chicago time. Counted across the whole file, from the raw lines.
+  - `N in file` counts every `VEVENT`, skipped ones included. `error: …` is kept for download failures of the whole feed.
+  - **No `unsupported` count** (planned, then dropped 2026-10-21): with ical.js, a rule it can't expand throws, and `skipped` already reports that.
 - `?date=YYYY-MM-DD` points the route at another day, for verifying parsing without waiting for a morning.
 - Key-protected: send `X-Read-Key` (see Read key).
 - **One bad event never sinks the feed.** Each event is parsed and expanded on its own; a failure skips that event and counts it in `skipped`. Until 2026-10-18 one unreadable event threw out of the whole feed, and `sources` read `error: …` with no events at all.
@@ -200,7 +238,7 @@ How a `TZID` is read (`resolveZone()` in the `CALENDAR` block):
 - **Anything else `Intl` rejects:** Chicago, counted as `fallback`.
 - No `TZID` and `Z` (UTC) times: unchanged.
 
-A recurring event repeats in its own zone, so a `GMT-0500` series keeps its offset and a New York series keeps New York wall-clock. Before, every series was expanded in Chicago. That gives the same times for US zones, which all change clocks on the same dates. Parameter values are read quote-aware, since a value holding a colon must be quoted (`TZID="GMT-05:00"`).
+A recurring event repeats in its own zone, so a `GMT-0500` series keeps its offset and a New York series keeps New York wall-clock. Before, every series was expanded in Chicago. That gives the same times for US zones, which all change clocks on the same dates. Parameter values are read quote-aware (ical.js, and the cheap pass's own `TZID` reader), since a value holding a colon must be quoted (`TZID="GMT-05:00"`).
 
 **The principle: the stated offset is authoritative; our guess about intent is not.** What the family feed showed on 2026-10-18 (counts only, nothing from the file kept, and per-label counts left out because this repo is public): about 5,000 events, under 100 of them using one of 8 offset labels, `GMT-0500` the most common. Each label's `VTIMEZONE` defines a single fixed offset with no daylight rule. None of those events recur, and none are dated today or later. Run locally against the real feed, the new code reads `ok (… in file, 2 on 2026-10-18)`, with nothing skipped or fallen back.
 
@@ -458,6 +496,8 @@ Before filtering on any field, ask whether it carries the meaning you think it d
 
 A related shape (Oct 18): **a field that looks like a standard value but isn't, plus one bad record taking down a whole source.** Apple's `TZID=GMT-0500` looks like a zone name and isn't one, so `Intl` threw, and one event's throw emptied the whole family calendar. So check that a field holds the kind of value you assume, and contain failures per record: one bad record should cost that one record and be counted, not take the source with it.
 
+Another (Oct 21): **a value that looks like a time but means something different depending on the machine it runs on.** ical.js turns a time in a zone it wasn't given into a "floating" time, and a floating time is read in the runtime's own zone: Chicago on Clint's Mac, UTC in the Worker. The same code is right in one place and five hours off in the other, so a passing local test proves nothing. Keep the conversion in code whose answer doesn't depend on the machine, and test under the zone production runs in (`TZ=UTC`).
+
 ---
 
 ## Backlog
@@ -475,13 +515,8 @@ A related shape (Oct 18): **a field that looks like a standard value but isn't, 
 - **Check family events on the card after Nov 1.** Rerun the `/calendar` curl on Nov 2 (see Time zones): `sources.icloud` should read `ok (…)`, and any family event with an offset label should show at the time Apple meant. If they're an hour off, the label meant Chicago after all, and the offset decision needs revisiting.
 - **Delete the `/sitwith` SEED** in `dashboard-worker/src/index.js` after Oct 21, 2026, once the archive itself covers a full week.
 - ~~Restore the Worker's secrets as the newest version~~ — **done** 2026-10-21 (see The Git build outage).
-- **Replace the calendar parser with ical.js** (step 2 of the wrangler move; step 1 shipped 2026-10-20). The hand-built recurrence expander gets some repeating events wrong:
-  - It ignores `BYDAY` on monthly and yearly rules, so a "third Tuesday of the month" event repeats on a fixed day of the month instead. (`BYDAY` is only used on weekly rules, and its ordinal, the `3` in `3TU`, is dropped.)
-    Seen live on 2026-10-21: a monthly family-calendar entry that belongs on a Tuesday showed on Wednesday the 21st and not on Tuesday the 20th, and its Wednesday twin didn't show at all. Most likely a third-Tuesday series that started on a Tuesday the 21st. Reproduced with a made-up two-event feed (`FREQ=MONTHLY;BYDAY=3TU` from `20251021`, `BYDAY=3WE` from `20251015`): the current code puts each on its start date's day of the month. Use that pair as a test case.
-  - Day-31 rollover: a monthly rule on the 31st (or a yearly one on Feb 29) is built with `Date.UTC`, which rolls a missing day into the next month, so the event shows on e.g. Mar 3 instead of being skipped for that month.
-  - Rule parts it doesn't read at all (`BYMONTHDAY`, `BYSETPOS`, `BYMONTH` and others) are silently ignored.
-
-  Keep the `sources` counters (`skipped`, `fallback`), and add an `unsupported` count for rules that still can't be expanded, so a wrong or missing event can't look like a free day. Keep `resolveZone()`'s handling of offset labels. Test against known dates from the real feeds (`?date=`) before and after. Keep this file generic: no event names from the calendars.
+- ~~Replace the calendar parser with ical.js~~ — **done** 2026-10-21 (see The calendar route).
+- **`/calendar` is over the Free plan's CPU limit** (see The calendar route, CPU). Every request uses hundreds of ms against a 10 ms limit, and some are killed with error 1102. Options: Workers Paid ($5/month), whose limit is far above what this needs and which would also cover every other route; or smaller savings in code, such as keeping ical.js's time-zone objects between requests instead of rebuilding them, which won't get near 10 ms with a 4 MB feed. A decision for Clint.
 - **Orangetheory October comparison** (Phase 1, item 4 of the brief; not yet run, needs the full month): for every class from Oct 1 to the end of manual entry, compare the API's zone minutes, calories, avg/peak HR, steps, tread miles, avg tread speed, rower meters and splats with OTF Class List, and give Clint a short mismatch report. Local and one-time; the report is never committed. Confirms each field means what the Notion field meant before he stops entering by hand.
 - **Orangetheory override** for a class the studio recorded wrong: decided not yet (see The Orangetheory card).
 

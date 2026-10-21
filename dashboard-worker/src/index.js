@@ -1,3 +1,6 @@
+// The calendar route parses ICS with ical.js (see the /calendar block).
+import ICAL from 'ical.js';
+
 // ─────────────────────────────────────────────────────────────────────────
 //  /sports route for briefing.clintsievers.workers.dev
 //
@@ -294,74 +297,35 @@ const READ_GATE = (() => {
 })();
 
 // ═══════════════════════════════════════════════════════════════════════
-//  /calendar route — drop-in block for briefing.clintsievers.workers.dev
+//  /calendar route — today's events from the ICS feeds
 // ═══════════════════════════════════════════════════════════════════════
 //
-//  SAVE A COPY OF THE WORKER BEFORE PASTING THIS. No version history.
+//  Secrets (set with `npx wrangler secret put <NAME>` from dashboard-worker/):
 //
-//  Two edits to the Worker:
+//      CAL_ICS_1   Google's secret iCal URL
+//      CAL_ICS_2   the family Apple calendar's public link, https:// not webcal://
 //
-//  1. Paste this whole block at the TOP LEVEL of the file, above
-//     `export default { ... }`. It declares exactly one top-level name —
-//     `CALENDAR` — so it cannot collide with anything already in there.
+//  The split of work, and why:
 //
-//  2. Add one line to the router in your fetch handler, alongside the
-//     existing /sports case. If it looks like this:
-//
-//         if (url.pathname === '/sports') return handleSports(request, env);
-//
-//     then add:
-//
-//         if (url.pathname === '/calendar') return CALENDAR.handle(request, env);
-//
-//  Environment variables (Settings → Variables and Secrets — these are
-//  separate from the code editor, and changing them needs no redeploy):
-//
-//      CAL_ICS_1   your Google secret iCal URL
-//      CAL_ICS_2   leave unset for now — the slot for the iCloud calendar
-//
-//  Store both as Secrets, not plaintext variables.
+//  ical.js decides WHICH occurrences exist: parsing, RRULE, EXDATE. This
+//  block decides WHEN they are: every wall-clock time becomes an instant
+//  here, from its wall-clock fields and its TZID, never inside ical.js.
+//  ical.js only knows a zone whose VTIMEZONE it was given. Any other TZID
+//  becomes "floating", and a floating time reads as the runtime's own zone,
+//  which in a Worker is UTC. So a test on a Mac set to Chicago passes while
+//  the deployed Worker is five hours off. Hence: no toJSDate(), toUnixTime()
+//  or convertToZone() in this block, and the tests run with TZ=UTC
+//  (scripts/calendar-test.mjs).
 // ═══════════════════════════════════════════════════════════════════════
 
 const CALENDAR = (() => {
   const TZ = 'America/Chicago';
   const CACHE_SECONDS = 300;
 
-  // ── ICS text handling ────────────────────────────────────────────────
-
   // A line beginning with space or tab continues the previous one. Google
   // wraps at 75 octets, so any title of normal length arrives folded.
   const unfold = t =>
     t.replace(/\r\n/g, '\n').replace(/\r/g, '\n').replace(/\n[ \t]/g, '');
-
-  const unescapeText = s => s
-    .replace(/\\n/gi, ' ')
-    .replace(/\\,/g, ',')
-    .replace(/\\;/g, ';')
-    .replace(/\\\\/g, '\\')
-    .trim();
-
-  // A parameter value holding `:` or `;` must be quoted
-  // (TZID="GMT-05:00"), so split on the first colon outside quotes.
-  function parseLine(line) {
-    let colon = -1, inQ = false;
-    const cuts = [];
-    for (let i = 0; i < line.length; i++) {
-      const c = line[i];
-      if (c === '"') inQ = !inQ;
-      else if (!inQ && c === ';') cuts.push(i);
-      else if (!inQ && c === ':') { colon = i; break; }
-    }
-    if (colon === -1) return null;
-    const bounds = [-1, ...cuts, colon];
-    const parts = bounds.slice(0, -1).map((b, i) => line.slice(b + 1, bounds[i + 1]));
-    const params = {};
-    for (const p of parts.slice(1)) {
-      const eq = p.indexOf('=');
-      if (eq > -1) params[p.slice(0, eq).toUpperCase()] = p.slice(eq + 1).replace(/^"(.*)"$/, '$1');
-    }
-    return { name: parts[0].toUpperCase(), params, value: line.slice(colon + 1) };
-  }
 
   // ── Time ─────────────────────────────────────────────────────────────
 
@@ -446,225 +410,200 @@ const CALENDAR = (() => {
     return { zone: TZ, fallback: true };
   }
 
-  // The two conversions the parser and the expander need, for either kind.
+  // Wall-clock time in a resolved zone → UTC instant, for either kind.
   const wallToUTC = (y, m, d, h, mi, s, z) => z.offset !== undefined
     ? Date.UTC(y, m - 1, d, h, mi, s) - z.offset * 60000
     : zonedToUTC(y, m, d, h, mi, s, z.zone);
 
-  const wallParts = (ms, z) => {
-    if (z.offset === undefined) return partsIn(ms, z.zone);
-    const t = new Date(ms + z.offset * 60000);
-    return { y: t.getUTCFullYear(), m: t.getUTCMonth() + 1, d: t.getUTCDate(),
-             h: t.getUTCHours(), mi: t.getUTCMinutes(), s: t.getUTCSeconds() };
-  };
-
-  // All-day events keep their raw date string. Their timestamp is not the
-  // fact; the date is. Round-tripping them through a UTC instant is how
-  // all-day events end up rendering on the wrong day.
-  function parseDateValue(value, params) {
-    if (params.VALUE === 'DATE' || /^\d{8}$/.test(value)) {
-      const y = +value.slice(0, 4), m = +value.slice(4, 6), d = +value.slice(6, 8);
-      return {
-        allDay: true,
-        dateStr: `${value.slice(0, 4)}-${value.slice(4, 6)}-${value.slice(6, 8)}`,
-        ms: zonedToUTC(y, m, d, 12, 0, 0, TZ),
-      };
-    }
-    const mt = value.match(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})(Z)?$/);
-    if (!mt) return null;
-    const [, Y, M, D, h, mi, s, z] = mt;
-    if (z) return { allDay: false, zone: { zone: TZ }, ms: Date.UTC(+Y, +M - 1, +D, +h, +mi, +s) };
-    // `zone` rides along so a recurring event repeats in its own zone.
-    const zone = resolveZone(params.TZID);
-    return {
-      allDay: false,
-      zone,
-      fallback: !!zone.fallback,
-      ms: wallToUTC(+Y, +M, +D, +h, +mi, +s, zone),
-    };
+  // ical.js Time → { allDay, dateStr } or { allDay: false, ms }. Reads only
+  // the wall-clock fields. All-day events keep their date: round-tripping
+  // them through a UTC instant is how they end up on the wrong day.
+  const pad = n => String(n).padStart(2, '0');
+  function at(t, z) {
+    if (t.isDate) return { allDay: true, dateStr: `${t.year}-${pad(t.month)}-${pad(t.day)}` };
+    return { allDay: false, ms: wallToUTC(t.year, t.month, t.day, t.hour, t.minute, t.second, z) };
   }
 
-  // ── Recurrence ───────────────────────────────────────────────────────
-  // A recurring event appears ONCE in the file. DTSTART is the FIRST
-  // occurrence, not today's. Filtering on DTSTART silently drops every
-  // standing meeting, and an empty card is indistinguishable from a free
-  // day — which is why this expander exists rather than a date comparison.
-
-  const DAYS = ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA'];
-
-  function parseRRule(value) {
-    const r = {};
-    for (const kv of value.split(';')) {
-      const [k, v] = kv.split('=');
-      if (k) r[k.toUpperCase()] = v;
-    }
-    return r;
+  // The zone a property's times are in: its TZID if it has one, UTC for a
+  // `Z` time, otherwise Chicago.
+  function zoneOf(prop) {
+    const tzid = prop.getParameter('tzid');
+    if (tzid) return resolveZone(tzid);
+    return prop.getFirstValue()?.zone?.tzid === 'UTC' ? { offset: 0 } : { zone: TZ };
   }
 
-  function expand(ev, winStart, winEnd) {
-    const PAD = 86400000;
-    if (!ev.rrule) {
-      return (ev.start.ms >= winStart - PAD && ev.start.ms < winEnd + PAD)
-        ? [ev.start] : [];
-    }
+  // ── Cutting the file ─────────────────────────────────────────────────
+  // ICAL.parse is all-or-nothing: one bad line anywhere throws for the
+  // whole file. So the file is cut into one chunk per VEVENT, each parsed
+  // on its own. A chunk that throws is skipped and counted, and one bad
+  // event never sinks the feed. VTIMEZONEs are cut out too and hung on one
+  // parent component, so every event can find its zone.
 
-    const r = parseRRule(ev.rrule);
-    const freq = (r.FREQ || '').toUpperCase();
-    const interval = Math.max(1, parseInt(r.INTERVAL || '1', 10));
-    const count = r.COUNT ? parseInt(r.COUNT, 10) : null;
-    const until = r.UNTIL ? (parseDateValue(r.UNTIL, {})?.ms ?? null) : null;
-    const byDay = r.BYDAY
-      ? r.BYDAY.split(',').map(t => t.replace(/^[-+]?\d+/, '').toUpperCase())
-      : null;
-
-    // Repeat in the event's own zone: a `GMT-0500` series stays at its
-    // stated offset, a New York one at New York wall-clock.
-    const zone = ev.start.allDay ? { zone: TZ } : (ev.start.zone || { zone: TZ });
-    const base = wallParts(ev.start.ms, zone);
-    const hits = [];
-    let emitted = 0;
-
-    // Bounded on purpose: an RRULE with no COUNT and no UNTIL is legal and
-    // infinite. Walk forward in the rule's own units and stop at the window.
-    const MAX_STEPS = 4000;
-    for (let step = 0; step < MAX_STEPS; step++) {
-      let cand;
-      if (freq === 'DAILY')        cand = new Date(Date.UTC(base.y, base.m - 1, base.d + step * interval));
-      else if (freq === 'WEEKLY')  cand = new Date(Date.UTC(base.y, base.m - 1, base.d + step * 7 * interval));
-      else if (freq === 'MONTHLY') cand = new Date(Date.UTC(base.y, base.m - 1 + step * interval, base.d));
-      else if (freq === 'YEARLY')  cand = new Date(Date.UTC(base.y + step * interval, base.m - 1, base.d));
-      else return [ev.start];
-
-      const dayCandidates = [];
-      if (freq === 'WEEKLY' && byDay) {
-        const weekStart = cand.getUTCDate() - cand.getUTCDay();
-        for (const d of byDay) {
-          const idx = DAYS.indexOf(d);
-          if (idx > -1) dayCandidates.push(new Date(Date.UTC(
-            cand.getUTCFullYear(), cand.getUTCMonth(), weekStart + idx)));
-        }
-      } else {
-        dayCandidates.push(cand);
-      }
-      dayCandidates.sort((a, b) => a - b);
-
-      let pastWindow = true;
-      for (const dc of dayCandidates) {
-        const y = dc.getUTCFullYear(), m = dc.getUTCMonth() + 1, d = dc.getUTCDate();
-        const ms = ev.start.allDay
-          ? zonedToUTC(y, m, d, 12, 0, 0, TZ)
-          : wallToUTC(y, m, d, base.h, base.mi, base.s, zone);
-
-        if (ms < ev.start.ms - 1000) continue;
-        if (until !== null && ms > until) continue;
-        if (count !== null && emitted >= count) continue;
-        emitted++;
-        if (ms >= winEnd + PAD) continue;
-        pastWindow = false;
-        if (ms < winStart - PAD) continue;
-
-        const dateStr = ev.start.allDay
-          ? `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`
-          : null;
-        const exKey = dateStr || (dateStrIn(ms, TZ) + 'T' + ms);
-        if (!ev.exdates.has(exKey)) hits.push({ ms, allDay: ev.start.allDay, dateStr });
-      }
-
-      if (count !== null && emitted >= count) break;
-      if (pastWindow && step > 0) break;
-      if (until !== null && dayCandidates.every(dc =>
-        Date.UTC(dc.getUTCFullYear(), dc.getUTCMonth(), dc.getUTCDate()) > until + PAD)) break;
-    }
-    return hits;
-  }
-
-  // ── Parse ────────────────────────────────────────────────────────────
-
-  // One bad event must not sink the feed. A line that throws marks its
-  // event bad, and the event is skipped and counted rather than aborting
-  // the parse. `vevents` counts every VEVENT, skipped ones included.
-  function parseICS(text) {
-    const events = [];
-    let cur = null, vevents = 0, skipped = 0;
+  function cut(text) {
+    const events = [], zones = [];
+    let cur = null, kind = null, depth = 0, broken = 0;
     for (const raw of unfold(text).split('\n')) {
       const line = raw.trim();
-      if (line === 'BEGIN:VEVENT') { cur = { exdates: new Set() }; vevents++; continue; }
-      if (line === 'END:VEVENT') {
-        if (cur) {
-          // No usable DTSTART is a skip too: dropping it quietly is exactly
-          // the free-afternoon look-alike the count exists to expose.
-          if (cur.bad || !cur.start || !Number.isFinite(cur.start.ms)) skipped++;
-          else events.push(cur);
-        }
+      if (!cur) {
+        if (line === 'BEGIN:VEVENT') { cur = []; kind = 'event'; depth = 0; }
+        else if (line === 'BEGIN:VTIMEZONE') { cur = [line]; kind = 'zone'; depth = 0; }
+        continue;
+      }
+      if (kind === 'event' && line === 'BEGIN:VEVENT') { broken++; cur = []; continue; }
+      if (line.startsWith('BEGIN:')) depth++;
+      if (depth === 0 && line === (kind === 'event' ? 'END:VEVENT' : 'END:VTIMEZONE')) {
+        if (kind === 'event') events.push(cur);
+        else zones.push([...cur, line].join('\r\n'));
         cur = null;
         continue;
       }
-      if (!cur || cur.bad) continue;
-
-      const p = parseLine(line);
-      if (!p) continue;
-
-      try { applyProp(cur, p); } catch { cur.bad = true; }
+      if (line.startsWith('END:')) depth--;
+      if (line) cur.push(line);
     }
-    return { events, vevents, skipped };
+    if (cur && kind === 'event') broken++;
+    return { events, zones, broken };
   }
 
-  function applyProp(cur, p) {
-    switch (p.name) {
-      case 'SUMMARY':  cur.summary = unescapeText(p.value); break;
-      case 'LOCATION': cur.location = unescapeText(p.value); break;
-      case 'STATUS':   cur.status = p.value.toUpperCase(); break;
-      case 'UID':      cur.uid = p.value; break;
-      case 'RRULE':    cur.rrule = p.value; break;
-      case 'DTSTART':
-        cur.start = parseDateValue(p.value, p.params);
-        if (cur.start?.fallback) cur.fallback = true;
-        break;
-      case 'DTEND':
-        cur.end = parseDateValue(p.value, p.params);
-        if (cur.end?.fallback) cur.fallback = true;
-        break;
-      case 'EXDATE':
-        for (const v of p.value.split(',')) {
-          const d = parseDateValue(v.trim(), p.params);
-          if (d) cur.exdates.add(d.allDay ? d.dateStr : dateStrIn(d.ms, TZ) + 'T' + d.ms);
+  // ── The cheap pass ───────────────────────────────────────────────────
+  // Building ical.js objects for all ~5,000 family events costs seconds,
+  // and nearly all are one-off events from other days. So the raw lines
+  // decide first whether an event could touch the target day:
+  //  - a one-off whose DTSTART date is within a day of it (the margin
+  //    covers every zone offset, all under a day);
+  //  - a series whose UNTIL isn't before that;
+  //  - a moved instance whose new date or original date is near it.
+  // A DTSTART this pass can't read keeps the event, so ical.js gets to fail
+  // on it and it's counted rather than quietly dropped.
+
+  const rawLine = (lines, name) =>
+    lines.find(l => l.startsWith(name + ':') || l.startsWith(name + ';'));
+  // A date value never holds a colon, so it follows the last one (a quoted
+  // parameter like TZID="GMT-05:00" may hold its own).
+  const rawDate = line => line?.slice(line.lastIndexOf(':') + 1).match(/^(\d{8})/)?.[1] ?? null;
+  const rawTzid = line => {
+    const m = line?.match(/;TZID=(?:"([^"]*)"|([^;:]*))/i);
+    return m ? (m[1] ?? m[2]) : null;
+  };
+
+  function nearDay(lines, lo, hi) {
+    const near = d => d !== null && d >= lo && d <= hi;
+    const rrule = rawLine(lines, 'RRULE');
+    if (rrule || rawLine(lines, 'RDATE')) {
+      const until = rrule?.match(/UNTIL=(\d{8})/i)?.[1];
+      return !until || until >= lo || !!rawLine(lines, 'RDATE');
+    }
+    const start = rawDate(rawLine(lines, 'DTSTART'));
+    if (start === null) return true;
+    const rid = rawLine(lines, 'RECURRENCE-ID');
+    return near(start) || (!!rid && near(rawDate(rid)));
+  }
+
+  // A TZID that is neither a zone name nor an offset label is read as
+  // Chicago and counted. Counted across the whole file, from the raw lines.
+  function fallsBack(lines) {
+    return ['DTSTART', 'DTEND'].some(name => {
+      const line = rawLine(lines, name);
+      const tzid = rawTzid(line);
+      return !!tzid && /T\d{6}/.test(line.slice(line.lastIndexOf(':') + 1))
+        && !!resolveZone(tzid).fallback;
+    });
+  }
+
+  // ── Reading an event ─────────────────────────────────────────────────
+
+  // Bounded on purpose: a rule with no COUNT and no UNTIL is legal and
+  // infinite. A series that hits the cap before reaching the day throws,
+  // so it is counted in `skipped` rather than silently missing.
+  const MAX_STEPS = 4000;
+
+  const textOf = (comp, name) => {
+    const v = comp.getFirstPropertyValue(name);
+    return v == null ? null : String(v).replace(/\n/g, ' ').trim();
+  };
+
+  function readEvent(lines, root, lo, hi) {
+    const comp = new ICAL.Component(ICAL.parse(['BEGIN:VEVENT', ...lines, 'END:VEVENT'].join('\r\n')), root);
+    const dtstart = comp.getFirstProperty('dtstart');
+    const first = dtstart?.getFirstValue();
+    if (!first) throw new Error('no DTSTART');
+    const zone = zoneOf(dtstart);
+    const start = at(first, zone);
+    if (!start.allDay && !Number.isFinite(start.ms)) throw new Error('unreadable DTSTART');
+
+    const ev = {
+      uid: comp.getFirstPropertyValue('uid'),
+      summary: textOf(comp, 'summary'),
+      location: textOf(comp, 'location'),
+      status: (textOf(comp, 'status') || '').toUpperCase(),
+      start, dur: 0, occurrences: [start], recurrenceId: null,
+    };
+
+    const dtend = comp.getFirstProperty('dtend');
+    if (dtend && !start.allDay) {
+      const end = at(dtend.getFirstValue(), zoneOf(dtend));
+      if (!end.allDay) ev.dur = end.ms - start.ms;
+    }
+
+    const rid = comp.getFirstProperty('recurrence-id');
+    if (rid) ev.recurrenceId = at(rid.getFirstValue(), zoneOf(rid));
+
+    if (!rid && (comp.hasProperty('rrule') || comp.hasProperty('rdate'))) {
+      // ical.js drops EXDATEs as it iterates. They're checked here too, as
+      // instants, so a removed date still goes if ical.js and the file
+      // disagree about a zone.
+      const ex = new Set();
+      for (const p of comp.getAllProperties('exdate')) {
+        const z = zoneOf(p);
+        for (const v of p.getValues()) {
+          const o = at(v, z);
+          ex.add(o.allDay ? 'D' + o.dateStr : 'T' + o.ms);
         }
-        break;
-      case 'RECURRENCE-ID': {
-        const d = parseDateValue(p.value, p.params);
-        if (d) cur.recurrenceId = d;
-        break;
+      }
+      ev.occurrences = [];
+      const it = new ICAL.Event(comp).iterator();
+      for (let step = 0; ; step++) {
+        if (step >= MAX_STEPS) throw new Error('step cap');
+        const t = it.next();
+        if (!t) break;
+        const wall = `${t.year}${pad(t.month)}${pad(t.day)}`;
+        if (wall > hi) break;
+        if (wall < lo) continue;
+        const occ = at(t, zone);
+        if (!ex.has(occ.allDay ? 'D' + occ.dateStr : 'T' + occ.ms)) ev.occurrences.push(occ);
       }
     }
+    return ev;
   }
 
   function eventsOnDay(text, dayStr, sourceLabel) {
     const [Y, M, D] = dayStr.split('-').map(Number);
-    const winStart = zonedToUTC(Y, M, D, 0, 0, 0, TZ);
-    const winEnd   = zonedToUTC(Y, M, D + 1, 0, 0, 0, TZ);
+    const ymd = n => new Date(Date.UTC(Y, M - 1, D + n)).toISOString().slice(0, 10).replace(/-/g, '');
+    const lo = ymd(-1), hi = ymd(1);
 
-    const parsed = parseICS(text);
-    let skipped = parsed.skipped;
-    const bad = new Set();
-    const skip = ev => { if (!bad.has(ev)) { bad.add(ev); skipped++; } };
+    const { events: chunks, zones, broken } = cut(text);
+    const tz = [];
+    for (const z of zones) { try { tz.push(ICAL.parse(z)); } catch {} }
+    const root = new ICAL.Component(['vcalendar', [], tz]);
+
+    let skipped = broken;
+    const read = [];
+    for (const lines of chunks) {
+      if (!nearDay(lines, lo, hi)) continue;
+      try { read.push(readEvent(lines, root, lo, hi)); } catch { skipped++; }
+    }
 
     // A rescheduled instance arrives as its own VEVENT with the same UID
     // plus a RECURRENCE-ID naming the instance it replaces.
-    const overrides = new Map();
-    for (const e of parsed.events) {
+    const overrides = new Set();
+    for (const e of read) {
       if (!e.recurrenceId) continue;
-      try {
-        overrides.set(e.uid + '|' +
-          (e.recurrenceId.dateStr || dateStrIn(e.recurrenceId.ms, TZ)), e);
-      } catch { skip(e); }
+      overrides.add(e.uid + '|' + (e.recurrenceId.dateStr || dateStrIn(e.recurrenceId.ms, TZ)));
     }
-    const all = parsed.events.filter(e => !bad.has(e));
 
     const out = [];
     const seen = new Set();
 
     const push = (ev, occ, into) => {
-      if (!occ) return;
       if (ev.status === 'CANCELLED') return;
       const day = occ.allDay ? occ.dateStr : dateStrIn(occ.ms, TZ);
       if (day !== dayStr) return;
@@ -672,20 +611,19 @@ const CALENDAR = (() => {
       const key = (ev.uid || ev.summary) + '|' + day + '|' + (occ.allDay ? 'all' : occ.ms);
       if (seen.has(key)) return;
 
-      const dur = (ev.end && !occ.allDay) ? ev.end.ms - ev.start.ms : 0;
       into.push({
         key,
         title: ev.summary || '(no title)',
         location: ev.location || null,
         allDay: occ.allDay,
         start: occ.allDay ? null : new Date(occ.ms).toISOString(),
-        end: (occ.allDay || dur <= 0) ? null : new Date(occ.ms + dur).toISOString(),
+        end: (occ.allDay || ev.dur <= 0) ? null : new Date(occ.ms + ev.dur).toISOString(),
         source: sourceLabel,
         sortKey: occ.allDay ? -1 : occ.ms,
       });
     };
 
-    for (const ev of all) {
+    for (const ev of read) {
       // Each event is built into its own list and merged only if it got
       // through whole, so one that throws halfway leaves nothing behind.
       const mine = [];
@@ -694,12 +632,12 @@ const CALENDAR = (() => {
         // it now happens. Rendering the RECURRENCE-ID puts a rescheduled
         // meeting back at its old time.
         if (ev.recurrenceId) push(ev, ev.start, mine);
-        else for (const occ of expand(ev, winStart, winEnd)) {
+        else for (const occ of ev.occurrences) {
           const day = occ.allDay ? occ.dateStr : dateStrIn(occ.ms, TZ);
           if (overrides.has(ev.uid + '|' + day)) continue;
           push(ev, occ, mine);
         }
-      } catch { skip(ev); continue; }
+      } catch { skipped++; continue; }
       for (const { key, ...e } of mine) {
         if (seen.has(key)) continue;
         seen.add(key);
@@ -708,10 +646,12 @@ const CALENDAR = (() => {
     }
     // `total` is how many VEVENTs the file contained at all. Without it,
     // "we downloaded a file we could not read" and "you have a free day"
-    // produce the same response. `skipped` and `fallback` count across the
-    // whole file, not just the day: a skipped event's date can't be known.
-    const fallback = all.filter(e => e.fallback && !bad.has(e)).length;
-    return { events: out, total: parsed.vevents, skipped, fallback };
+    // produce the same response. `fallback` counts across the whole file.
+    // `skipped` counts events that couldn't be read among those the cheap
+    // pass let through, plus any VEVENT the cut found broken: an event the
+    // pass sets aside is never parsed, so it can't be counted.
+    const fallback = chunks.filter(fallsBack).length;
+    return { events: out, total: chunks.length + broken, skipped, fallback };
   }
 
   // ── Handler ──────────────────────────────────────────────────────────

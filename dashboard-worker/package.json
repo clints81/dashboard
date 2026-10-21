@@ -5,9 +5,13 @@
   "scripts": {
     "deploy": "wrangler deploy",
     "dry-run": "wrangler deploy --dry-run",
-    "tail": "wrangler tail"
+    "tail": "wrangler tail",
+    "test:calendar": "TZ=UTC node scripts/calendar-test.mjs"
   },
   "devDependencies": {
     "wrangler": "^4.147.0"
+  },
+  "dependencies": {
+    "ical.js": "2.2.1"
   }
 }
