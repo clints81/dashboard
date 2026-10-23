@@ -13,5 +13,9 @@
 - Decided-but-unbuilt work lives in the Backlog section of the
   reference doc. Add to it when a brief defers something; remove
   items when they ship.
+- course/ is a training course on how the dashboard works. Whenever a
+  change affects architecture, data flow, keys or deployment, update the
+  matching course lessons in the same change. Each lesson lists the files
+  it depends on at the top. Never put a secret value in the course.
 - Run node --check on every JS file. Never commit without asking; Clint reviews
   and approves changes. Then commit.

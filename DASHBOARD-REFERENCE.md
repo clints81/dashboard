@@ -1,6 +1,6 @@
 # Morning Dashboard — Architecture Reference
 
-Last updated: October 21, 2026
+Last updated: October 23, 2026
 
 ## What this is
 A personal morning dashboard for Clint Sievers, hosted on GitHub Pages. Plain HTML/CSS/JS — no framework, no build step. It exists to replace aimless scrolling with a purposeful briefing.
@@ -18,11 +18,18 @@ Repo files:
 - `dashboard-worker/` — the Cloudflare Worker: source in `src/index.js`, config in `wrangler.toml` (edit, commit, then `npm run deploy` from that folder)
 - `briefing-retrieval/` — the Worker that writes the briefing overnight; its own `README.md` and `DESIGN.md` (see The briefing system)
 - `DASHBOARD-REFERENCE.md` — this file
+- `course/` — a training course on how the dashboard works (see below); kept off the Pages site by `_config.yml`
+- `_config.yml` — GitHub Pages (Jekyll) settings: excludes `course/` from the site
 - `briefs/` — briefs from the planning chat, **gitignored** (local only; see below)
 
 Everything in this repo is public and served by GitHub Pages. Secrets live in Cloudflare and 1Password, never here.
 
 **Briefs** (since 2026-10-18): a brief written in the planning chat is saved to `briefs/` for Claude Code to read. The folder is in `.gitignore` because briefs can hold private context (the calendar brief named the family calendar and a trip), and committing one would publish it. Briefs aren't kept in git at all: once one is built, its decisions and reasons live in this file, so the brief is disposable.
+
+**The course** (since 2026-10-23): `course/` teaches Clint how the dashboard works using its own code, so he can follow Claude Code's tool calls, diffs, git steps and approval prompts, and ask sharper questions when something breaks. `course/README.md` is the index: a one-page map and a glossary (the 5-minute refresher), then seven ~10-minute lessons (what runs where; fetched vs. generated; keys and secrets; tool calls, diffs and tests; branches to deploys; approval prompts; when something breaks). Each lesson lists the files it depends on, and `CLAUDE.md` requires updating the matching lessons whenever a change affects architecture, data flow, keys or deployment. No secret values appear in it.
+
+- **Kept off the live site.** Pages builds this repo with Jekyll (there's no `.nojekyll`, `_config.yml` or Actions workflow), which publishes every file whose name doesn't start with `_` or `.`. So `_config.yml` lists `course` under `exclude`. That only holds while Pages builds with Jekyll from a branch: switching to an Actions workflow or adding `.nojekyll` would publish `course/` again. It couldn't be checked from the cloud session (`github.io` is blocked there), so it's in the Backlog to confirm after merge.
+- **Still public on github.com**, like the rest of the repo. Clint OK'd that on 2026-10-23: the course describes where keys live and which routes are locked, which this file already says publicly.
 
 ---
 
@@ -519,6 +526,7 @@ Another (Oct 21): **a value that looks like a time but means something different
 - **`/calendar` is over the Free plan's CPU limit** (see The calendar route, CPU). Every request uses hundreds of ms against a 10 ms limit, and some are killed with error 1102. **Decided 2026-10-21: stay on the Free plan for now** and accept an occasional "unavailable" calendar card. Revisit if it starts failing often enough to matter; the fix then is Workers Paid ($5/month), whose limit is far above what this needs and which would cover every other route too. Smaller savings in code (such as keeping ical.js's time-zone objects between requests) won't get near 10 ms with a 4 MB feed.
 - **Orangetheory October comparison** (Phase 1, item 4 of the brief; not yet run, needs the full month): for every class from Oct 1 to the end of manual entry, compare the API's zone minutes, calories, avg/peak HR, steps, tread miles, avg tread speed, rower meters and splats with OTF Class List, and give Clint a short mismatch report. Local and one-time; the report is never committed. Confirms each field means what the Notion field meant before he stops entering by hand.
 - **Orangetheory override** for a class the studio recorded wrong: decided not yet (see The Orangetheory card).
+- **Confirm `course/` isn't on the live site** once the course PR merges: Settings → Pages should say "Deploy from a branch", and `clints81.github.io/dashboard/course/` (and `/course/00-map.html`) should return 404. If either is served, Pages isn't building with Jekyll and the exclusion needs another approach (see The course).
 
 ---
 
