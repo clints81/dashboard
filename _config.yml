@@ -1,0 +1,6 @@
+# GitHub Pages builds this site with Jekyll, which publishes every file in
+# the repo unless it's listed here (or its name starts with _ or .).
+# course/ is a training course about the dashboard, not part of the site.
+# It's still public on github.com, like everything in this repo.
+exclude:
+  - course
