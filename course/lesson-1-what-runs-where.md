@@ -2,7 +2,7 @@
 
 *About 10 minutes.*
 
-**Depends on:** `index.html`, `app.js`, `dashboard-worker/src/index.js`, `dashboard-worker/wrangler.toml`, `briefing-retrieval/src/index.js`, `briefing-retrieval/src/judge.js`, `briefing-retrieval/wrangler.toml`, `DASHBOARD-REFERENCE.md` (The Worker, The briefing system, otf-sync)
+**Depends on:** `index.html`, `read.html`, `shared.js`, `app.js`, `read.js`, `dashboard-worker/src/index.js`, `dashboard-worker/wrangler.toml`, `briefing-retrieval/src/index.js`, `briefing-retrieval/src/judge.js`, `briefing-retrieval/wrangler.toml`, `DASHBOARD-REFERENCE.md` (The Worker, The briefing system, otf-sync)
 
 ## The concept
 
@@ -26,16 +26,19 @@ Your four places:
 
 ## Where it lives in your files
 
-### The page: three files, loaded in order
+### The pages: files loaded in order
 
-The bottom of `index.html` loads the settings first, then the logic that uses them:
+The bottom of `index.html` loads the settings first, then the code both pages share, then the iPad's own logic:
 
 ```html
 <script src="config.js"></script>
+<script src="shared.js"></script>
 <script src="app.js"></script>
 ```
 
-That order matters. `app.js` reads `CONFIG`, which only exists once `config.js` has run. If Claude Code ever swaps these lines, every card breaks.
+That order matters. `app.js` uses `CONFIG` and the helpers in `shared.js` (the Worker address, `fetchRetry`, the keys, dates), which only exist once those files have run. If Claude Code ever swaps these lines, every card breaks.
+
+The phone's reading page, `read.html` (added Nov 2026), loads the same first two files and then `read.js`. Both pages fetch through `shared.js` and differ only in how they show the data: two pages that each fetch and decode for themselves drift apart.
 
 When the page starts, `app.js` kicks off every card at once:
 
@@ -49,8 +52,9 @@ function loadLiveData() {
   loadOtf();
   loadDevotion();
   loadOnThisDay();
-  loadBriefing(); // handles both briefing and sit-with
-  loadSitArchive();
+  loadBriefing().then(applyDoneMarks); // handles both briefing and sit-with
+  loadSitArchive().then(applyDoneMarks);
+  loadReadingMarks();
 }
 ```
 
@@ -117,7 +121,7 @@ otf-sync is Python code in the private repo `clints81/otf-sync`, run by GitHub A
 3:30     deadline: any source not finished is marked failed, pool built anyway
 3:40     otf-sync → PUT /otf
 4:30     if the batch still isn't back: ask Claude directly, full price
-~6:00    you open the iPad → page loads → 9 requests in parallel
+~6:00    you open the iPad → page loads → 10 requests in parallel
 7:00     briefing-retrieval's second timer (a leftover snapshot job)
 all day  page re-asks on foreground / reconnect
 ```
@@ -128,7 +132,7 @@ Daylight saving times shown; in winter everything on a UTC timer happens an hour
 
 The folder Claude Code touches tells you which place is changing:
 
-- **Edits to `app.js`, `index.html` or `config.js`**: the page. It goes live when it reaches `main`. Claude Code may offer to run a local preview server (`python3 -m http.server 8765`, from `.claude/launch.json`) and take screenshots at iPad size.
+- **Edits to `app.js`, `index.html`, `read.js`, `read.html`, `shared.js` or `config.js`**: the pages. It goes live when it reaches `main`. Claude Code may offer to run a local preview server (`python3 -m http.server 8765`, from `.claude/launch.json`) and take screenshots at iPad size.
 - **Edits under `dashboard-worker/`**: the `briefing` Worker. You should expect, at the end, a step that runs `npm run deploy` from that folder. If Claude Code says "done" without a deploy, the change isn't live yet.
 - **Edits under `briefing-retrieval/`**: the overnight job. Same deploy rule, and you won't see the effect until the next night's run (or a manual `POST /judge`).
 - **Edits to a `wrangler.toml`**: the Worker's settings, not its code. Lesson 6 treats these as high-stakes, because a deploy removes any setting not in the file.

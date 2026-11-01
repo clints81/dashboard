@@ -1,0 +1,15 @@
+{
+  "name": "Reading",
+  "short_name": "Reading",
+  "start_url": "./read.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#faf6ee",
+  "theme_color": "#faf6ee",
+  "icons": [
+    { "src": "read-icon-180.png", "sizes": "180x180", "type": "image/png" },
+    { "src": "read-icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "read-icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }
+  ]
+}

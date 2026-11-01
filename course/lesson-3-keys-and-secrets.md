@@ -2,7 +2,7 @@
 
 *About 10 minutes.*
 
-**Depends on:** `app.js` (read-key section, `fetchRetry`), `dashboard-worker/src/index.js` (`READ_GATE`, the root `PUT`, `OTF`, `READING_STATE`), `dashboard-worker/wrangler.toml`, `briefing-retrieval/wrangler.toml`, `briefing-retrieval/.dev.vars.example`, `briefing-retrieval/src/judge.js` (`putDashboard`), both Worker `.gitignore` files, `DASHBOARD-REFERENCE.md` (Read key, State key, The reading state, The write key paragraph, The Git build outage, otf-sync)
+**Depends on:** `shared.js` (keys, `fetchRetry`), `app.js` (read-key section), `read.js` (key form, marking), `dashboard-worker/src/index.js` (`READ_GATE`, the root `PUT`, `OTF`, `READING_STATE`), `dashboard-worker/wrangler.toml`, `briefing-retrieval/wrangler.toml`, `briefing-retrieval/.dev.vars.example`, `briefing-retrieval/src/judge.js` (`putDashboard`), both Worker `.gitignore` files, `DASHBOARD-REFERENCE.md` (Read key, State key, The reading state, The write key paragraph, The Git build outage, otf-sync)
 
 *No secret values appear in this lesson. `<READ_KEY>` and similar are placeholders.*
 
@@ -14,7 +14,7 @@ A **secret** is any value that, on its own, lets someone do something: read your
 2. **Each secret should allow as little as possible.** Your read key can read but not write. Your write key can write but not read. Your state key can mark a sit-with piece done or not done, and nothing else. A leak of one doesn't hand over everything.
 3. **A secret that might have leaked gets rotated, not deleted.** Removing it from a file doesn't remove it from git history, a log, a screenshot or a chat transcript. Only a new value makes the old one useless.
 
-Your repo is **public**, and so is `app.js` (anyone can view a web page's source). That's why rule 1 is absolute here.
+Your repo is **public**, and so are `app.js`, `read.js` and `shared.js` (anyone can view a web page's source). That's why rule 1 is absolute here.
 
 ## Where it lives in your files
 
@@ -38,19 +38,22 @@ Four routes return personal data: `/calendar` (your schedule), `/tasks` (the chu
 
 Read it line by line: if the Worker has no key configured, refuse everyone (*fail closed*: when unsure, lock rather than open). If the request has no key, 401 "missing". If it has the wrong one, 401 "rejected". Otherwise, let it through. This check runs *before* the cache, so a request without the key can't be handed a saved copy someone else fetched.
 
-The page side, in `app.js`:
+The page side, in `shared.js` (both pages use it):
 
 ```js
-// /calendar, /tasks and /otf need X-Read-Key. The key is entered once per device
-// and kept in this browser's storage, never in the repo or this file.
+// Two keys, each entered once per device and kept in this browser's
+// storage, never in the repo or this file. Each does one job:
+//   read key   X-Read-Key    /calendar, /tasks, /otf, GET /reading-state
+//   state key  X-State-Key   POST /reading-state (marking a pick done)
 ...
 const READ_KEY_STORE = 'dashReadKey';
+const STATE_KEY_STORE = 'dashStateKey';
 ```
 
 Where the read key lives:
 - Cloudflare: the `READ_KEY` secret on the `briefing` Worker
 - 1Password: item "Dashboard read key"
-- Each device's browser storage (`localStorage["dashReadKey"]`), typed in once on the card
+- Each device's browser storage (`localStorage["dashReadKey"]`), typed in once on the card (iPad) or the reading list (phone)
 
 ### The write key: lets a program change what's stored
 
@@ -84,7 +87,7 @@ The write it opens is deliberately narrow: it can change only the `reading-state
 Where the state key lives:
 - Cloudflare: the `STATE_KEY` secret on the `briefing` Worker
 - 1Password: item "Dashboard state key"
-- Each device's browser storage (`localStorage["dashStateKey"]`), typed in once per device (from Stage 3 of the phone page)
+- The phone's browser storage (`localStorage["dashStateKey"]`), typed in once on the reading page. Only the phone marks things, so only the phone needs it; the iPad just shows the marks, which takes the read key.
 
 ### Everything else, by name only
 

@@ -2,13 +2,13 @@
 
 *Layer 1 refresher. Skim it; come back to it when a word stops you.*
 
-**Depends on:** `app.js`, `config.js`, `index.html`, `dashboard-worker/wrangler.toml`, `dashboard-worker/src/index.js`, `dashboard-worker/package.json`, `briefing-retrieval/wrangler.toml`, `.gitignore`, `CLAUDE.md`
+**Depends on:** `app.js`, `shared.js`, `read.js`, `config.js`, `index.html`, `read.html`, `dashboard-worker/wrangler.toml`, `dashboard-worker/src/index.js`, `dashboard-worker/package.json`, `briefing-retrieval/wrangler.toml`, `.gitignore`, `CLAUDE.md`
 
 Each term gets a plain definition, the general name for it (so it carries over to other projects), and where it shows up in your files.
 
 ## The pieces and where they run
 
-**Static site / static host.** A website made of plain files the server hands over unchanged. Your page is one; **GitHub Pages** is the static host. *Where:* `index.html`, `app.js`, `config.js` at the repo root. Live at `clints81.github.io/dashboard`.
+**Static site / static host.** A website made of plain files the server hands over unchanged. Your page is one; **GitHub Pages** is the static host. *Where:* `index.html`, `read.html` and their scripts at the repo root. Live at `clints81.github.io/dashboard`.
 
 **Front end / back end.** The front end runs in your browser (the page). The back end runs on a server somewhere else (the Workers). *Where:* front end is the repo root; back ends are `dashboard-worker/` and `briefing-retrieval/`.
 
@@ -54,7 +54,7 @@ Each term gets a plain definition, the general name for it (so it carries over t
 
 **RSS / feed.** A machine-readable list of a site's latest items. *Where:* the sports feeds, the WELS devotion feed and the lectionary calendar (a calendar file, ICS, read like a feed) in `dashboard-worker/src/index.js`; the news sources in `briefing-retrieval/src/sources.js`.
 
-**localStorage.** A small storage area in one browser on one device, kept between visits. *Where:* `localStorage.getItem('dashReadKey')` in `app.js`; it's where each device keeps the read key.
+**localStorage.** A small storage area in one browser on one device, kept between visits. *Where:* `getStoredKey()` in `shared.js`; it's where each device keeps the read key (`dashReadKey`) and, on the phone, the state key (`dashStateKey`).
 
 ## Security
 

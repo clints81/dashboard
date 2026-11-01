@@ -2,11 +2,11 @@
 //  app.js  — Dashboard runtime
 //  Pulls live data, renders all widgets.
 //  Edit config.js, not this file.
+//  Loaded after shared.js, which holds what the phone page (read.js) uses
+//  too: the Worker URL, fetchRetry, the keys, dates and text helpers.
 // ─────────────────────────────────────────────
 
 // ── Utilities ──────────────────────────────────────────────────────────
-
-const $ = id => document.getElementById(id);
 
 function dayName(date) {
   return date.toLocaleDateString('en-US', { weekday: 'long' });
@@ -34,88 +34,9 @@ function todaySeed() {
   return d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate();
 }
 
-// Today as YYYY-MM-DD in Chicago. toISOString() is UTC, which rolls over to
-// tomorrow at 7pm Central (6pm in winter).
-function chicagoDate(d = new Date()) {
-  return new Intl.DateTimeFormat('en-CA', {
-    timeZone: CONFIG.location?.timezone || 'America/Chicago',
-    year: 'numeric', month: '2-digit', day: '2-digit',
-  }).format(d);
-}
-
-// Date-string arithmetic, anchored at UTC noon so no zone can shift the day.
-const dateAtNoon = ymd => new Date(ymd + 'T12:00:00Z');
-function shiftDate(ymd, days) {
-  const d = dateAtNoon(ymd);
-  d.setUTCDate(d.getUTCDate() + days);
-  return d.toISOString().slice(0, 10);
-}
-const weekdayOf = (ymd, style = 'long') =>
-  dateAtNoon(ymd).toLocaleDateString('en-US', { weekday: style, timeZone: 'UTC' });
-
-// ── Network helper ─────────────────────────────────────────────────────
-// Every live card goes through this. One retry after a short pause, because
-// the most common failure is a fetch firing before wifi is actually up
-// (iPad waking from sleep). All of these calls are reads with no side
-// effects, so retrying them is always safe.
-
-function escapeHTML(s) {
-  return String(s ?? '').replace(/[&<>"']/g, c =>
-    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-}
-
-// Some upstream text arrives entity-encoded (&#39;). Decode it to plain text
-// first, then escape it for wherever it goes. A textarea parses entities
-// without running or rendering anything.
-const entityBox = document.createElement('textarea');
-function decodeEntities(s) {
-  entityBox.innerHTML = String(s ?? '');
-  return entityBox.value;
-}
-
-// A failed status is thrown with `.status` on the error, so callers can tell
-// "locked" (401) from "broken" (anything else).
-async function fetchRetry(url, { headers, tries = 2, delayMs = 2500 } = {}) {
-  let lastErr;
-  for (let i = 0; i < tries; i++) {
-    try {
-      const res = await fetch(url, headers ? { headers } : undefined);
-      if (!res.ok) {
-        const err = new Error(`HTTP ${res.status}`);
-        err.status = res.status;
-        throw err;
-      }
-      return res;
-    } catch (e) {
-      lastErr = e;
-      // A 401 is an answer, not a blip: asking again in 2.5s with the same
-      // key gets the same answer.
-      if (e.status === 401) break;
-      if (i < tries - 1) await new Promise(r => setTimeout(r, delayMs));
-    }
-  }
-  throw lastErr;
-}
-
 // ── Read key ───────────────────────────────────────────────────────────
-// /calendar, /tasks and /otf need X-Read-Key. The key is entered once per device
-// and kept in this browser's storage, never in the repo or this file.
-// Storage can throw (private mode, blocked site data), so every access is
-// guarded, and a key saved while storage is unavailable still works until
-// the page closes.
-
-const READ_KEY_STORE = 'dashReadKey';
-let readKeyFallback = '';
-
-function getReadKey() {
-  try { return localStorage.getItem(READ_KEY_STORE) || readKeyFallback; }
-  catch { return readKeyFallback; }
-}
-
-function setReadKey(key) {
-  readKeyFallback = key;
-  try { localStorage.setItem(READ_KEY_STORE, key); } catch {}
-}
+// /calendar, /tasks and /otf need X-Read-Key. getReadKey()/setReadKey() are
+// in shared.js; this is the iPad's way of asking for the key on a card.
 
 // One compact line in place of the card's content. `rejected` = a key is
 // stored and the Worker said 401; otherwise there's no key on this device.
@@ -299,7 +220,7 @@ async function loadSports() {
 
   const cap = CONFIG.sports?.maxItems ?? 6;
   const leagueCap = CONFIG.sports?.maxLeague ?? 3;
-  const url = CONFIG.sports?.url || 'https://briefing.clintsievers.workers.dev/sports';
+  const url = CONFIG.sports?.url || `${WORKER}/sports`;
 
   try {
     const res = await fetchRetry(url);
@@ -402,7 +323,7 @@ async function loadCalendar() {
   const badge = $('cal-badge');
   if (!el || keyFieldOpen(el)) return;
 
-  const url = CONFIG.calendar?.url || 'https://briefing.clintsievers.workers.dev/calendar';
+  const url = CONFIG.calendar?.url || `${WORKER}/calendar`;
   const key = getReadKey();
   if (!key) return renderLocked(el, badge, false);
 
@@ -472,7 +393,7 @@ async function loadTasks() {
   const badge = $('tasks-badge');
   if (!el || keyFieldOpen(el)) return;
 
-  const url = CONFIG.tasks?.url || 'https://briefing.clintsievers.workers.dev/tasks';
+  const url = CONFIG.tasks?.url || `${WORKER}/tasks`;
   const key = getReadKey();
   if (!key) return renderLocked(el, badge, false);
 
@@ -553,7 +474,7 @@ async function loadDevotion() {
   const el = $('devotion-content');
   if (!el) return;
 
-  const url = CONFIG.devotion?.url || 'https://briefing.clintsievers.workers.dev/devotion';
+  const url = CONFIG.devotion?.url || `${WORKER}/devotion`;
 
   try {
     const res = await fetchRetry(`${url}?t=${Date.now()}`);
@@ -790,7 +711,7 @@ async function loadOtf() {
   const badge = $('otf-badge');
   if (!el || keyFieldOpen(el)) return;
 
-  const url = CONFIG.otf?.url || 'https://briefing.clintsievers.workers.dev/otf';
+  const url = CONFIG.otf?.url || `${WORKER}/otf`;
   const key = getReadKey();
   if (!key) return renderLocked(el, badge, false);
 
@@ -884,7 +805,7 @@ function renderWorkout() {
 // overnight. The dashboard Worker serves it back publicly, with CORS headers
 // so the browser can read it. No key needed to read.
 
-const BRIEFING_URL = 'https://briefing.clintsievers.workers.dev/';
+const BRIEFING_URL = `${WORKER}/`;
 
 async function loadBriefing() {
   const headlinesEl = $('briefing-headlines');
@@ -963,19 +884,9 @@ async function loadBriefing() {
 // A broken archive says so ("Archive unavailable") rather than hiding the
 // strip, so it can't pass for a quiet week.
 
-const SITWITH_URL = 'https://briefing.clintsievers.workers.dev/sitwith';
-
 async function loadSitArchive() {
-  let data = null;
-  try {
-    const res = await fetchRetry(`${SITWITH_URL}?days=14&t=${Date.now()}`);
-    data = await res.json();
-  } catch {}
-  renderSitArchive(data, chicagoDate());
+  renderSitArchive(await fetchSitwith(14), chicagoDate());
 }
-
-const plain = s => escapeHTML(decodeEntities(s));
-const safeHref = u => /^https?:\/\//i.test(u || '') ? escapeHTML(u) : '#';
 
 // `data` is the /sitwith JSON, or null when the fetch failed. `today` is a
 // Chicago YYYY-MM-DD, passed in so a Sunday can be checked on any day.
@@ -1052,6 +963,30 @@ function renderLastWeek(ok, items, today) {
   </div>`;
 }
 
+// ── Done marks ─────────────────────────────────────────────────────────
+// Picks marked done on the phone (Worker /reading-state, read key) get a
+// quiet check in the sit-with card, the strip and Sunday's week card.
+// Nothing else on the iPad changes, and marking happens on the phone only.
+// Without the read key, or if the state can't be read, there are no marks:
+// the iPad never marks anything itself, so no mark is the honest default.
+
+let readingDone = {};
+
+async function loadReadingMarks() {
+  const r = await fetchReadingState();
+  readingDone = r.status === 'ok' ? r.items : {};
+  applyDoneMarks();
+}
+
+// Called after each piece renders, so the order the fetches finish in
+// doesn't matter.
+function applyDoneMarks() {
+  const isDone = a => !!a && !!readingDone[a.getAttribute('href')];
+  const hero = $('sit-content');
+  if (hero) hero.classList.toggle('is-done', isDone($('sit-link')));
+  for (const a of document.querySelectorAll('.sit-past-row, .week-item')) a.classList.toggle('is-done', isDone(a));
+}
+
 // ── Init ───────────────────────────────────────────────────────────────
 
 // Cards that render instantly from config.
@@ -1068,8 +1003,9 @@ function loadLiveData() {
   loadOtf();
   loadDevotion();
   loadOnThisDay();
-  loadBriefing(); // handles both briefing and sit-with
-  loadSitArchive();
+  loadBriefing().then(applyDoneMarks); // handles both briefing and sit-with
+  loadSitArchive().then(applyDoneMarks);
+  loadReadingMarks();
 }
 
 function init() {
