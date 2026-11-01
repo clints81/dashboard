@@ -1,6 +1,6 @@
 # Morning Dashboard — Architecture Reference
 
-Last updated: October 23, 2026
+Last updated: November 1, 2026
 
 ## What this is
 A personal morning dashboard for Clint Sievers, hosted on GitHub Pages. Plain HTML/CSS/JS — no framework, no build step. It exists to replace aimless scrolling with a purposeful briefing.
@@ -81,12 +81,13 @@ It serves these routes:
 | `/calendar` | GET | Parses ICS calendar feeds (`env.CAL_ICS_1` / `CAL_ICS_2`) for today's events. **Requires `X-Read-Key`.** CORS `*`. 5-min cache. |
 | `/tasks` | GET | Queries the JELC treasurer Notion database (`env.NOTION_TOKEN`) for what's due and recently settled. **Requires `X-Read-Key`.** CORS `*`. 5-min cache. |
 | `/devotion` | GET | Fetches the WELS Daily Devotions RSS feed and extracts verse, reference, title, excerpt. No secret. CORS `*`. 3-hr cache. |
+| `/lectionary` | GET | This week's Sunday readings (CW 2021) from the WELSTech public calendar, references only. No secret. CORS `*`. 12-hr cache per day. See The lectionary route. |
 | `/otf` | PUT | Stores the otf-sync payload in KV (key `otf-sync`). Requires `X-Write-Key`, same key as `/`. A failed sync keeps the last good data. See The Orangetheory card. |
 | `/otf` | GET | Last good Orangetheory data plus the last sync attempt. **Requires `X-Read-Key`.** CORS `*`. 5-min cache, dropped on every PUT. |
 
 The write key is `WRITE_KEY` in this Worker's Cloudflare settings, with copies in 1Password, as the `DASHBOARD_WRITE_KEY` secret on the `briefing-retrieval` Worker, and as the `DASHBOARD_WRITE_KEY` Actions secret in `otf-sync`. Rotating it means updating all three. It was rotated 2026-10-08, when it came out of the Cowork task text. Never in the repo. The other secrets (`CAL_ICS_1`, `CAL_ICS_2`, `NOTION_TOKEN`, `READ_KEY`) are Worker secrets too, listed by name in `wrangler.toml`.
 
-Each route is one top-level name in `dashboard-worker/src/index.js` (`handleSports`, `CALENDAR`, `TASKS`, `DEVOTION`, `SITWITH`, `OTF`) plus one line in the `fetch` router. Follow that convention when adding a route — it's what keeps per-route constants (each block has its own `CACHE_SECONDS`) from colliding.
+Each route is one top-level name in `dashboard-worker/src/index.js` (`handleSports`, `CALENDAR`, `TASKS`, `DEVOTION`, `LECTIONARY`, `SITWITH`, `OTF`) plus one line in the `fetch` router. Follow that convention when adding a route — it's what keeps per-route constants (each block has its own `CACHE_SECONDS`) from colliding.
 
 ### Read key
 `/calendar`, `/tasks` and `/otf` return Clint's schedule, the church's payables and his workout data, so they need a read key. Every other route stays public, `/sitwith` included: the picks aren't personal, and the computer bookmark should show them without a key.
@@ -125,6 +126,7 @@ History: while the briefing ran in Cowork, GitHub was ruled out as the delivery 
 - **Calendar** — Worker `/calendar` route. Today's events from Google/iCloud ICS feeds. See below.
 - **Treasurer tasks** — Worker `/tasks` route. JELC tasks from Notion. See below.
 - **Daily devotion** — Worker `/devotion` route. WELS Daily Devotions RSS. See below.
+- **Lectionary readings** — Worker `/lectionary` route. No page uses it yet; the phone reading page will (see Backlog). See The lectionary route.
 - **Orangetheory** — Worker `/otf` route, filled by the otf-sync Action. See The Orangetheory card.
 
 All of these go through `fetchRetry()` in `app.js`: one retry after 2.5s, and a non-200 is treated as failure rather than parsed as JSON. The thrown error carries `.status`. A 401 is not retried, so the key-protected cards can tell "locked" from "broken".
@@ -291,6 +293,52 @@ Each feed item follows a fixed template, which is what makes extraction reliable
 - 3-hour cache (devotions update once a day, ~05:30 UTC); `?t=N` forces a rebuild.
 
 If the WELS template ever changes and the verse stops parsing, `sources.wels` reports `parse-miss` rather than showing a blank card. Sibling feeds exist if a different flavor is ever wanted: `/bible3/feed/bible3` (Through My Bible in Three Years — a reading plan), plus family/women's/teen devotion feeds, all listed at `wels.net/rss-feeds`.
+
+---
+
+## The lectionary route
+
+Added 2026-11-01, Stage 1 of the phone reading page (see Backlog). `/lectionary` returns this week's Sunday readings from the Christian Worship 2021 lectionary, as references only. JELC uses **CW 2021** (confirmed by Clint). The source is the WELSTech public Google Calendar for CW 2021, whose ICS URL is the `FEED` constant in the `LECTIONARY` block. It's public: no secret, no read key, like `/devotion`.
+
+### Decisions
+- **Which events (Clint's call):** on Sunday, that day's; Monday through Saturday, the coming Sunday's, plus anything between today and that Sunday, so a midweek service (Christmas Eve, Ash Wednesday, Thanksgiving) shows in the week leading up to it and drops off once it's past. Anticipation, not reflection: the week prepares for Sunday.
+- **References only**, no passage text and no links to a Bible site (the earlier Bible-card decision): the card should send Clint to his Bible.
+- **A line scan, not ical.js**, because of the CPU limit (below).
+- **Worship order** for the readings: First Reading, Psalm, Second Reading, Gospel. The feed's own order varies by season (Psalm last in November 2026, second from Advent).
+- **Two events on one date both show,** in feed order (Easter Dawn and Easter Day; Palm Sunday and Sunday of the Passion).
+- **Errors in the feed are shown as the feed has them.** Dec 13, 2026 lists 1 Thessalonians 6:16-24, though the book has five chapters (5:16-24 is meant). In Nov 2028 "Last Sunday in the Church Year" is dated on the Thursday and Thanksgiving on the Sunday. A quiet fix in code would make the card disagree with its source. Telling WELSTech is the way to fix it.
+
+### What the feed is (checked 2026-11-01)
+Downloaded by Clint (this repo's cloud sessions couldn't reach `calendar.google.com` at first), and cross-checked through the Google Calendar API: 220 KB, 6,088 lines, **375 events from Advent 2022 (Nov 27, 2022) to Nov 26, 2028**. Every `DTSTART` is `VALUE=DATE` (all-day), and there are no `RRULE`s, moved instances or time zones. SUMMARY is the Sunday or festival name. DESCRIPTION holds the readings as label/reference line pairs. The file itself is never committed.
+
+The description format has changed twice. 2022–23 used uppercase labels plus the whole hymn plan; 2023–25 used HTML (`<b>First Reading</b> …<br>`) plus hymns and "Gospel Acc" verses; **from Advent 2025 on, all 171 events are plain readings only.** The parser keeps only reading labels (First Reading, Second Reading, Psalm, Gospel, Reading, Passion Reading), so the old formats mostly parse too, but only the current one will ever be in a window.
+
+What the parser has to allow for, every one seen in the real file:
+- **Folding cuts escapes and words in half.** `Second Reading\` ends one line and `n1 Thessalonians…` starts the next; "Rom" / "ans". So an event is unfolded before it's unescaped (`\n`, `\,`, `\;`). Commas always arrive escaped: `Isaiah 61:1-3\,10-11`.
+- **Garbled dashes.** From March 2027, 64 events hold U+0096 where an en-dash belongs (and U+0097 for an em-dash): a Windows en-dash decoded wrongly somewhere upstream. Google's API view and a terminal both hide it, so "Isaiah 25:6–9" looked like "Isaiah 25:69". The parser turns them back into dashes. Non-breaking spaces become spaces.
+- **Loose layout.** Label case varies; a label and reference can share a line ("Psalm 96"); a reference can be split over two lines ("Romans" / "16:25-27", Dec 20, 2026); one label is glued to the number before it ("91Second Reading", Mar 5, 2028); a Psalm is a bare number ("149", shown as "Psalm 149").
+- **No description** on Thanksgiving: returned with `"note": "no readings listed"`, not as a failure.
+
+Run against the real file for every day from Nov 1, 2026 to Nov 26, 2028, every day came back `ok`, and every event from Advent 2025 on gave real references (some readings are whole chapters or one-chapter books: "Hosea 3", "Jude 20-25").
+
+### The response
+`{sunday, window: {from, to}, today, events: [{date, day, name, readings: [{label, ref}], note?}], source, sources: {lectionary}, generated}`. `?date=YYYY-MM-DD` answers for another day; `?t=N` forces a rebuild.
+
+`sources.lectionary` keeps a download failure, a file that isn't a calendar, a calendar that didn't parse and an empty week apart:
+- `ok (N in file, M in window)`
+- `parse-miss (…)`: an event in the window has a description but no reading was found in it. The description changed shape.
+- `no-items (…)`: nothing dated on the Sunday itself. Expected after Nov 26, 2028, when the feed runs out (Backlog).
+- `empty-file`, `not-ics` (Google sent something else, such as a sign-in page), `HTTP nnn`, `error: …`
+
+### CPU and cache
+The Free plan allows 10 ms of CPU per request (see The calendar route). The first version split the whole file into lines and looked at each, about 7 ms of CPU cold in Node: too close. The scan now jumps from one `DTSTART` to the next with `indexOf`, reads only the date, and unfolds and parses only the few events inside the window. On the real file that adds about 1.4 ms over a one-event feed in Node, most of it decoding the download. Node isn't the Workers runtime, so check `cpuTime` in `wrangler tail` after deploying.
+
+The answer depends on the day, so **the Chicago date is part of the cache key** (`?date=` is set on the key even when the request has none). With a plain 12-hour cache, a copy filled on Sunday evening would still show that Sunday on Monday morning. A good answer is cached 12 hours; a failure 5 minutes, so it retries soon.
+
+To verify after a deploy (public, no key): `curl "https://briefing.clintsievers.workers.dev/lectionary?t=1"` should read `ok (375 in file, …)`, and `npm run tail` from `dashboard-worker/` shows each request's `cpuTime`.
+
+### Testing
+`npm run test:lectionary` from `dashboard-worker/` runs `scripts/lectionary-test.mjs`: a made-up feed with every quirk above, through the Worker's real handler, checked day by day (Sunday, Monday, Saturday, a midweek service ahead, on its day and past, Christmas week, a same-day pair, a parse-miss, the end of the feed), plus each failure state, refused bad dates, and the cache key and lifetimes. Each fix in the parser was checked to be load-bearing: removing it fails the test.
 
 ---
 
@@ -505,6 +553,8 @@ A related shape (Oct 18): **a field that looks like a standard value but isn't, 
 
 Another (Oct 21): **a value that looks like a time but means something different depending on the machine it runs on.** ical.js turns a time in a zone it wasn't given into a "floating" time, and a floating time is read in the runtime's own zone: Chicago on Clint's Mac, UTC in the Worker. The same code is right in one place and five hours off in the other, so a passing local test proves nothing. Keep the conversion in code whose answer doesn't depend on the machine, and test under the zone production runs in (`TZ=UTC`).
 
+Another (Nov 1): **a rendered view can hide the very character that matters.** Through Google's API and in a terminal, the 2028 Easter readings looked broken ("Isaiah 25:69"); the raw bytes showed a garbled en-dash (U+0096) that both views dropped. Before calling source data wrong, look at the raw file. The same day showed a quieter shape: **a cache key has to include everything the answer depends on.** `/lectionary` answers differently by day, so the day is in its key.
+
 ---
 
 ## Backlog
@@ -517,7 +567,13 @@ Another (Oct 21): **a value that looks like a time but means something different
 - ~~Decide whether league fill earns its slots~~ — capped at 3, headline-only (Oct 2026). Revisit if the card feels thin.
 - Cleaner Worker URL via a `clintsievers.com` subdomain (deliberately deferred)
 - ~~git for the Worker~~ — **done**; deployed with wrangler since 2026-10-20 (see The Worker).
-- **Bible card:** this Sunday's lectionary readings (JELC follows the lectionary), spread across the week as references only, with no text, so it sends Clint to his Bible. Not the three-year reading plan.
+- **Bible card:** this Sunday's lectionary readings, as references only. The `/lectionary` route is **built** (2026-11-01, see The lectionary route); the readings show on the phone reading page's devotion card (below).
+- **Phone reading page** (brief of 2026-11-01, built in three stages, each approved by Clint before the next). Stage 1, `/lectionary`, is built. Still to build:
+  - **Stage 2, synced "done" state:** KV key `reading-state`, a map of sit-with URL → `{status: "done", at}`, trimmed to picks still in the 60-pick archive. `GET /reading-state` needs the read key; the write needs **a new, separate state key** (Worker secret such as `STATE_KEY`, 1Password item, its own browser storage and header), set up exactly like the read key. **Keys stay single-purpose (Clint's call):** the read key keeps meaning read, because separate keys have worked well so far. The write can change only `reading-state` and refuses any other body shape.
+  - **Stage 3, the page:** `read.html` with its own manifest (portrait), and shared code (`shared.js`: Worker URL, `fetchRetry`, key helpers, `chicagoDate()`, decode/escape, the `/sitwith` fetch) loaded by both pages, since two pages rendering the same data drift apart. The iPad page must look identical before and after (screenshots at 1194×834). The iPad shows a quiet done mark on picks marked done, nothing else.
+  - **Decisions behind it:** a **separate page, not a responsive iPad page**: the phone is for reading and the iPad for a short morning glance, and the iPad page is tuned to 1194 wide with a landscape-locked manifest. **No full-text reader view:** most sit-with sources are paywalled, so the Worker would mostly fetch teasers, and serving article text from a public site would republish other people's work; a tap opens the publisher, where Clint's subscriptions live (links from a home-screen app open in the right app, logged in, checked 2026-11-01). **Phone cards:** reading list, devotion plus this week's readings, weather, briefing; not teams, Orangetheory, Treasurer tasks or calendar, which are easy to reach on the phone already or are busy next to long reading. **"Done" syncs between phone and iPad**, stored in the Worker, chosen over a phone-only state so there's less to manage later. **Unread picks age out after 14 days** rather than piling up; done ones stay in a collapsed "Read" section. One pick a day is enough for now: no new collecting. The calendar's CPU overrun stays as decided on 2026-10-21.
+- **Retrieval shortlist (mock up, decide later):** the judge returns two to four "also worth your time" pieces from the sit-with pool alongside the daily pick, shown on the phone page. Clint likes more options but is wary of clutter, so it needs a mockup before a decision.
+- **Check the lectionary feed before Advent 2028.** Its last event is Nov 26, 2028; from Nov 27, 2028, `/lectionary` reads `no-items` until WELSTech extends the calendar (or publishes a new one, whose URL would replace `FEED`). Look in autumn 2028.
 - **Strategy Muse card**, behind the read key: a few lines (next milestones, hours against plan). The tracker is an Apps Script in the Strategy Muse Google account and can serve a minimal summary. The project plan is a Claude.ai artifact the Worker can't read, so it needs a copy that's refreshed whenever a workstream is fleshed out.
 - **Check family events on the card after Nov 1.** Rerun the `/calendar` curl on Nov 2 (see Time zones): `sources.icloud` should read `ok (…)`, and any family event with an offset label should show at the time Apple meant. If they're an hour off, the label meant Chicago after all, and the offset decision needs revisiting.
 - **Delete the `/sitwith` SEED** in `dashboard-worker/src/index.js` after Oct 21, 2026, once the archive itself covers a full week.

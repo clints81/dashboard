@@ -123,7 +123,7 @@ These are the best candidates for "don't ask again", and only in their exact for
 
 **Examples:** web fetches, `curl` to your Worker's routes.
 
-**Check:** a `GET` to a public route (`/`, `/sports`, `/devotion`, `/sitwith`) reads public data. `PUT` or `POST` changes something. A request to `/calendar`, `/tasks` or `/otf` needs the read key, so check how the key is being passed.
+**Check:** a `GET` to a public route (`/`, `/sports`, `/devotion`, `/lectionary`, `/sitwith`) reads public data. `PUT` or `POST` changes something. A request to `/calendar`, `/tasks` or `/otf` needs the read key, so check how the key is being passed.
 
 ### 11. Other connected services: Notion, Gmail, Calendar, Drive
 

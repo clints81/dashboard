@@ -1079,6 +1079,273 @@ const DEVOTION = (() => {
 })();
 
 // ═══════════════════════════════════════════════════════════════════════
+//  /lectionary route — this week's Sunday readings (CW 2021), references only
+// ═══════════════════════════════════════════════════════════════════════
+//
+//  One top-level name — LECTIONARY — plus one router line below.
+//
+//  Source: the WELSTech public Google Calendar for the Christian Worship
+//  2021 lectionary (JELC uses CW 2021). Public feed, no key, no secret.
+//  Checked 2026-11-01: 220 KB, 375 events from Advent 2022 to Nov 2028,
+//  every one all-day (DTSTART;VALUE=DATE), one-off (no RRULE), no time
+//  zones. SUMMARY is the Sunday or festival name; DESCRIPTION holds the
+//  readings as label/reference lines ("First Reading\nIsaiah 64:1-9\n…").
+//
+//  Why a plain scan and not ical.js: /calendar is already far over the Free
+//  plan's 10 ms CPU limit. This file is small and simple enough that a scan
+//  of the raw text does the job (see scan() for the numbers), behind a
+//  12-hour cache.
+//
+//  Which events: on Sunday, that day's; Monday to Saturday, everything from
+//  today through the coming Sunday (so a midweek festival such as Christmas
+//  Eve shows in the week leading up to the Sunday). The week prepares for
+//  Sunday: anticipation, not reflection.
+//
+//  References only, no passage text and no Bible-site links: the card
+//  should send Clint to his Bible.
+//
+//  What the feed does that the parser has to allow for (all seen in the
+//  real file):
+//    - folding splits escapes and words ("Second Reading\" / " n1 Thess…",
+//      "Rom" / "ans"), so unfold first, then unescape
+//    - commas arrive escaped ("Isaiah 61:1-3\,10-11")
+//    - en-dashes garbled to U+0096 (and em-dashes to U+0097) from 2027 on
+//    - label case varies (FIRST READING / First Reading), and order varies
+//      (Psalm last in some seasons, second in others)
+//    - a label and reference on one line ("Psalm 96"), and a reference split
+//      over two lines ("Romans" / "16:25-27")
+//    - older seasons add hymns, "Gospel Acc" verses and HTML; only reading
+//      labels are kept
+//    - some events have no DESCRIPTION (Thanksgiving)
+//    - two events on one date (Easter Dawn and Day, Palm Sunday and Sunday
+//      of the Passion): both are shown, in feed order
+//  Known errors in the feed are shown as the feed has them, not patched
+//  (Clint's call, 2026-11-01): a quiet fix would make the card disagree
+//  with its source.
+// ═══════════════════════════════════════════════════════════════════════
+
+const LECTIONARY = (() => {
+  const CACHE_SECONDS = 12 * 60 * 60; // the readings don't change
+  const FAIL_CACHE_SECONDS = 5 * 60;  // a failure retries soon
+  const TZ = 'America/Chicago';
+  const FEED = 'https://calendar.google.com/calendar/ical/c_61a4543308e7c7934308c604ba699109b31aa7429a5e386457b9e8cdd72b62bb%40group.calendar.google.com/public/basic.ics';
+  const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+  const DAY_MS = 24 * 60 * 60 * 1000;
+  const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+  // Reading labels, matched case-insensitively at the start of a line.
+  // Rank is worship order (Clint's call, 2026-11-01): the feed's own order
+  // varies by season. "Gospel Acc…" (the acclamation verse) is not a reading.
+  const LABELS = [
+    { re: /^first\s+reading\b/i, label: 'First Reading', rank: 0 },
+    { re: /^psalm\b/i, label: 'Psalm', rank: 1 },
+    { re: /^second\s+reading\b/i, label: 'Second Reading', rank: 2 },
+    { re: /^passion\s+reading\b/i, label: 'Passion Reading', rank: 3 },
+    { re: /^reading\b/i, label: 'Reading', rank: 3 },
+    { re: /^gospel\b(?!\s*acc)/i, label: 'Gospel', rank: 4 },
+  ];
+
+  function chicagoToday() {
+    const p = {};
+    const dtf = new Intl.DateTimeFormat('en-US', {
+      timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit',
+    });
+    for (const { type, value } of dtf.formatToParts(Date.now())) {
+      if (type !== 'literal') p[type] = value;
+    }
+    return `${p.year}-${p.month}-${p.day}`;
+  }
+
+  // Dates as UTC-midnight instants, so day arithmetic is plain integer math.
+  const toMs = s => Date.UTC(+s.slice(0, 4), +s.slice(5, 7) - 1, +s.slice(8, 10));
+  const toStr = ms => new Date(ms).toISOString().slice(0, 10);
+
+  // Sunday: that day. Monday–Saturday: today through the coming Sunday.
+  function windowFor(today) {
+    const ms = toMs(today);
+    const dow = new Date(ms).getUTCDay();
+    const sunday = toStr(ms + ((7 - dow) % 7) * DAY_MS);
+    return { from: today, to: sunday, sunday };
+  }
+
+  // ICS text escapes: \n (or \N) newline, \, \; \\ literal.
+  const unescape = s => s.replace(/\\([nN,;\\])/g, (_, c) => (c === 'n' || c === 'N' ? '\n' : c));
+
+  // Text cleanup after unescaping: the garbled dashes, non-breaking spaces,
+  // and the HTML some older seasons used.
+  function clean(s) {
+    return s
+      .replace(/\u0096/g, '–').replace(/\u0097/g, '—').replace(/ /g, ' ')
+      .replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]+>/g, '')
+      .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&');
+  }
+
+  const tidy = s => s.replace(/[ \t]+/g, ' ').trim();
+
+  // A reference as shown: no sermon-text asterisks or stray trailing commas.
+  const tidyRef = s => tidy(s).replace(/^\*+\s*/, '').replace(/[\s*,]+$/, '');
+
+  // "Romans" alone on a line, its chapter on the next.
+  const bookOnly = s => /^(?:[1-3]\s)?[A-Za-z][A-Za-z ]*$/.test(s);
+
+  function readings(desc) {
+    // A label glued to the number before it ("91Second Reading", Mar 5,
+    // 2028, the newline missing in the feed) goes back on its own line.
+    const lines = clean(desc)
+      .replace(/(\d)(?=(?:first\s+reading|second\s+reading|gospel|psalm)\b)/gi, '$1\n')
+      .split('\n').map(tidy).filter(Boolean);
+    const out = [];
+    for (let i = 0; i < lines.length; i++) {
+      // A "Gospel Acc" label alone on its line: its verse is on the next
+      // line and may itself start "Psalm …", so step over it.
+      if (/^gospel\s*acc/i.test(lines[i]) && !/\d/.test(lines[i])) { i++; continue; }
+      const hit = LABELS.find(l => l.re.test(lines[i]));
+      if (!hit) continue;
+      let ref = lines[i].replace(hit.re, '').replace(/^[\s,:]+/, '');
+      if (!ref) {
+        const next = lines[i + 1];
+        if (!next || LABELS.some(l => l.re.test(next))) continue; // label with nothing under it
+        ref = next; i++;
+      }
+      if (bookOnly(ref) && /^\d/.test(lines[i + 1] || '')) { ref = `${ref} ${lines[i + 1]}`; i++; }
+      ref = tidyRef(ref);
+      if (!ref) continue;
+      if (hit.label === 'Psalm' && /^\d/.test(ref)) ref = `Psalm ${ref}`;
+      out.push({ label: hit.label, ref, rank: hit.rank });
+    }
+    return out
+      .map((r, i) => ({ ...r, i }))
+      .sort((a, b) => a.rank - b.rank || a.i - b.i)
+      .map(({ label, ref }) => ({ label, ref }));
+  }
+
+  // The scan jumps from one DTSTART to the next with indexOf and reads only
+  // the date. Only an event inside the window is cut out, unfolded and read
+  // line by line. Splitting and looping over all ~6,000 lines instead cost
+  // about 7 ms of CPU cold in Node (2026-11-01), too near the 10 ms limit;
+  // this costs well under 1 ms.
+  function readEvent(chunk) {
+    const ev = {};
+    for (const line of chunk.replace(/\r?\n[ \t]/g, '').split('\n')) {
+      const l = line.replace(/\r$/, '');
+      const colon = l.indexOf(':');
+      if (colon < 0) continue;
+      const name = l.slice(0, colon).split(';')[0].toUpperCase();
+      const value = l.slice(colon + 1);
+      if (name === 'DTSTART') { const m = value.match(/^(\d{8})/); if (m) ev.date = m[1]; }
+      else if (name === 'SUMMARY') ev.summary = value;
+      else if (name === 'DESCRIPTION') ev.desc = value;
+      else if (name === 'STATUS') ev.status = value.trim().toUpperCase();
+    }
+    return ev;
+  }
+
+  function scan(text, win) {
+    const from = win.from.replace(/-/g, ''), to = win.to.replace(/-/g, '');
+    let inFile = 0;
+    for (let p = text.indexOf('BEGIN:VEVENT'); p >= 0; p = text.indexOf('BEGIN:VEVENT', p + 12)) inFile++;
+
+    const hits = [];
+    for (let p = text.indexOf('\nDTSTART'); p >= 0; p = text.indexOf('\nDTSTART', p + 8)) {
+      const colon = text.indexOf(':', p);
+      const date = text.slice(colon + 1, colon + 9);
+      if (!/^\d{8}$/.test(date) || date < from || date > to) continue;
+      const start = text.lastIndexOf('BEGIN:VEVENT', p);
+      const end = text.indexOf('END:VEVENT', p);
+      if (start < 0 || end < 0) continue;
+      const ev = readEvent(text.slice(start, end));
+      if (ev.date && ev.status !== 'CANCELLED') hits.push(ev);
+    }
+    // Date order; feed order within a date (the sort is stable).
+    hits.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+    const events = hits.map(h => {
+      const date = `${h.date.slice(0, 4)}-${h.date.slice(4, 6)}-${h.date.slice(6, 8)}`;
+      const desc = h.desc ? unescape(h.desc) : '';
+      const ev = {
+        date,
+        day: WEEKDAYS[new Date(toMs(date)).getUTCDay()],
+        name: tidy(clean(unescape(h.summary || ''))) || '(untitled)',
+        readings: desc.trim() ? readings(desc) : [],
+      };
+      if (!desc.trim()) ev.note = 'no readings listed';
+      return ev;
+    });
+    return { inFile, events };
+  }
+
+  // sources.lectionary, worst first, so a download failure, a file that
+  // isn't a calendar, a calendar that didn't parse and a week with nothing
+  // in it never look alike:
+  //   ok (N in file, M in window)
+  //   parse-miss (…)   an event in the window has a description, no readings
+  //   no-items (…)     nothing on the Sunday itself (the feed ends Nov 2028)
+  //   empty-file | not-ics | HTTP nnn | error: …
+  function verdict(inFile, events, sunday) {
+    const counts = `(${inFile} in file, ${events.length} in window)`;
+    if (events.some(e => !e.note && !e.readings.length)) return `parse-miss ${counts}`;
+    if (!events.some(e => e.date === sunday)) return `no-items ${counts}`;
+    return `ok ${counts}`;
+  }
+
+  async function build(today) {
+    const win = windowFor(today);
+    const base = { sunday: win.sunday, window: { from: win.from, to: win.to }, events: [],
+      source: 'Christian Worship 2021 lectionary (WELSTech calendar)' };
+    try {
+      const res = await fetch(FEED, { headers: { 'User-Agent': 'clint-dashboard/1.0' } });
+      if (!res.ok) return { ...base, sources: { lectionary: `HTTP ${res.status}` } };
+      const text = await res.text();
+      if (!text.trim()) return { ...base, sources: { lectionary: 'empty-file' } };
+      if (!/^\s*BEGIN:VCALENDAR/.test(text)) return { ...base, sources: { lectionary: 'not-ics' } };
+      const { inFile, events } = scan(text, win);
+      return { ...base, events, sources: { lectionary: verdict(inFile, events, win.sunday) } };
+    } catch (e) {
+      return { ...base, sources: { lectionary: `error: ${e.message}` } };
+    }
+  }
+
+  async function handle(request) {
+    const cors = {
+      'access-control-allow-origin': '*',
+      'access-control-allow-methods': 'GET, OPTIONS',
+      'content-type': 'application/json; charset=utf-8',
+    };
+    if (request.method === 'OPTIONS') return new Response(null, { headers: cors });
+    if (request.method !== 'GET') {
+      return new Response(JSON.stringify({ error: 'GET only' }), { status: 405, headers: cors });
+    }
+
+    // ?date=YYYY-MM-DD answers for another day, to check the rules without
+    // waiting for one. ?t=N forces a rebuild, as on the other routes.
+    const url = new URL(request.url);
+    const asked = url.searchParams.get('date');
+    if (asked && !(DATE_RE.test(asked) && toStr(toMs(asked)) === asked)) {
+      return new Response(JSON.stringify({ error: 'date must be YYYY-MM-DD' }), { status: 400, headers: cors });
+    }
+    const today = asked || chicagoToday();
+
+    // The answer depends on the day, so the day is part of the cache key.
+    // Otherwise Sunday evening's copy would show that Sunday on Monday.
+    const keyUrl = new URL(url);
+    keyUrl.searchParams.set('date', today);
+    const cache = caches.default;
+    const cacheKey = new Request(keyUrl.toString(), { method: 'GET' });
+    const hit = await cache.match(cacheKey);
+    if (hit) return hit;
+
+    const data = { ...(await build(today)), today, generated: new Date().toISOString() };
+    const ok = data.sources.lectionary.startsWith('ok');
+    const res = new Response(JSON.stringify(data), {
+      headers: { ...cors, 'cache-control': `public, max-age=${ok ? CACHE_SECONDS : FAIL_CACHE_SECONDS}` },
+    });
+    await cache.put(cacheKey, res.clone());
+    return res;
+  }
+
+  return { handle, readings, windowFor };
+})();
+
+// ═══════════════════════════════════════════════════════════════════════
 //  /sitwith route — the archive of past "something to sit with" picks
 // ═══════════════════════════════════════════════════════════════════════
 //
@@ -1352,6 +1619,7 @@ export default {
     if (url.pathname === '/calendar') return CALENDAR.handle(request, env);
     if (url.pathname === '/tasks') return TASKS.handle(request, env);
     if (url.pathname === '/devotion') return DEVOTION.handle(request);
+    if (url.pathname === '/lectionary') return LECTIONARY.handle(request);
     if (url.pathname === '/sitwith') return SITWITH.handle(request, env);
     if (url.pathname === '/otf') return OTF.handle(request, env);
 

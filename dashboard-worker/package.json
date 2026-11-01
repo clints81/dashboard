@@ -6,7 +6,8 @@
     "deploy": "wrangler deploy",
     "dry-run": "wrangler deploy --dry-run",
     "tail": "wrangler tail",
-    "test:calendar": "TZ=UTC node scripts/calendar-test.mjs"
+    "test:calendar": "TZ=UTC node scripts/calendar-test.mjs",
+    "test:lectionary": "node scripts/lectionary-test.mjs"
   },
   "devDependencies": {
     "wrangler": "^4.147.0"

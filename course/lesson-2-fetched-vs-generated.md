@@ -2,13 +2,13 @@
 
 *About 10 minutes.*
 
-**Depends on:** `app.js` (`loadBriefing`), `config.js` (`sitWith`), `briefing-retrieval/src/briefing-prompt.md`, `briefing-retrieval/src/judge.js` (`verify`, `toDashboard`, `failureEdition`), `briefing-retrieval/wrangler.toml` (`MODEL`, `PUBLISH`), `dashboard-worker/src/index.js` (sports matching, devotion parsing)
+**Depends on:** `app.js` (`loadBriefing`), `config.js` (`sitWith`), `briefing-retrieval/src/briefing-prompt.md`, `briefing-retrieval/src/judge.js` (`verify`, `toDashboard`, `failureEdition`), `briefing-retrieval/wrangler.toml` (`MODEL`, `PUBLISH`), `dashboard-worker/src/index.js` (sports matching, devotion and lectionary parsing)
 
 ## The concept
 
 Every word on your dashboard came from one of four places, and they fail in different ways:
 
-1. **Fetched**: copied from a source as-is, or cut down by fixed rules. Weather, calendar events, Notion tasks, the devotion verse, sports headlines, Orangetheory numbers, On this day. If it's wrong, the source was wrong or the rules misread it.
+1. **Fetched**: copied from a source as-is, or cut down by fixed rules. Weather, calendar events, Notion tasks, the devotion verse, the week's lectionary readings, sports headlines, Orangetheory numbers, On this day. If it's wrong, the source was wrong or the rules misread it.
 2. **Generated**: written by a language model (Claude, through the Claude API). The briefing's synthesis, each story's title, summary and category, and the sit-with pick's type and description. If it's wrong, the model got it wrong, so it has to be checked.
 3. **Written by your own code**: fixed messages the Workers or the page produce, like "Partial edition: …" or "No briefing yet today."
 4. **Static**: typed into `config.js` by hand and shown when nothing better is available.
@@ -69,7 +69,7 @@ Which model writes it is a setting, not code: `MODEL = "claude-opus-5-5"` in `br
 
 ### Fetched doesn't mean untouched
 
-The fetched cards still pass through your code, which can misread them. The devotion route finds the verse by the shape of the WELS feed; if WELS changes its template, `sources.wels` says `parse-miss`. The calendar route turns raw calendar files into times; that's where the time-zone bugs lived. "Fetched" tells you the facts came from outside. It doesn't tell you the code read them right.
+The fetched cards still pass through your code, which can misread them. The devotion route finds the verse by the shape of the WELS feed; if WELS changes its template, `sources.wels` says `parse-miss`. The calendar route turns raw calendar files into times; that's where the time-zone bugs lived. And the source itself can be wrong: the lectionary calendar lists 1 Thessalonians 6:16-24 for Dec 13, 2026, though the book has five chapters. The route shows it as the feed has it, on purpose, so the card never disagrees with its source. "Fetched" tells you the facts came from outside. It doesn't tell you the code read them right.
 
 ## What it looks like when Claude Code is working on it
 
