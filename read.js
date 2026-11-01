@@ -280,10 +280,10 @@ async function loadDevotion() {
     const d = await (await fetchRetry(`${WORKER}/devotion?t=${Date.now()}`)).json();
     if (d.sources?.wels !== 'ok' || !d.verse) throw new Error('not ok');
     el.innerHTML = `
-      <div class="verse">${escapeHTML(d.verse)}</div>
-      ${d.reference ? `<div class="verse-ref">${escapeHTML(d.reference)}</div>` : ''}
-      ${d.title ? `<div class="dev-title">${escapeHTML(d.title)}</div>` : ''}
-      ${d.excerpt ? `<div class="dev-excerpt">${escapeHTML(d.excerpt)}</div>` : ''}
+      <div class="verse">${plain(d.verse)}</div>
+      ${d.reference ? `<div class="verse-ref">${plain(d.reference)}</div>` : ''}
+      ${d.title ? `<div class="dev-title">${plain(d.title)}</div>` : ''}
+      ${d.excerpt ? `<div class="dev-excerpt">${plain(d.excerpt)}</div>` : ''}
       <div class="dev-links">
         ${d.readUrl ? `<a href="${safeHref(d.readUrl)}" target="_blank" rel="noopener">Read</a>` : ''}
         ${d.audioUrl ? `<a href="${safeHref(d.audioUrl)}" target="_blank" rel="noopener">Listen</a>` : ''}
@@ -307,11 +307,11 @@ async function loadLectionary() {
       const when = ev.date === today ? 'Today'
         : dateAtNoon(ev.date).toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric', timeZone: 'UTC' });
       const rows = ev.readings.length
-        ? `<dl class="lect-list">${ev.readings.map(r => `<dt>${escapeHTML(r.label)}</dt><dd>${escapeHTML(r.ref)}</dd>`).join('')}</dl>`
+        ? `<dl class="lect-list">${ev.readings.map(r => `<dt>${plain(r.label)}</dt><dd>${plain(r.ref)}</dd>`).join('')}</dl>`
         : `<div class="note">No readings listed</div>`;
       return `<div class="lect-event">
           <div class="lect-when">${when}</div>
-          <div class="lect-name">${escapeHTML(ev.name)}</div>
+          <div class="lect-name">${plain(ev.name)}</div>
           ${rows}
         </div>`;
     }).join('');
@@ -322,7 +322,10 @@ async function loadLectionary() {
 
 // ── Briefing ───────────────────────────────────────────────────────────
 // Collapsed to the synthesis and headlines; tap a headline for its summary
-// and the link. Everything is escaped: it's text from the overnight run.
+// and the link. Text from the overnight run arrives HTML-encoded (an
+// apostrophe as &#39;), so it's decoded, then escaped: plain() in shared.js.
+// Escaping alone showed "&#39;" on the page (2026-11-01). The same goes
+// for every other card's upstream text.
 
 function renderBriefing(b) {
   const el = $('briefing');
@@ -332,20 +335,20 @@ function renderBriefing(b) {
     return;
   }
   const stale = b.date !== chicagoDate()
-    ? `<span class="stale">No briefing yet today. Showing ${escapeHTML(b.day || b.date)}’s.</span>` : '';
+    ? `<span class="stale">No briefing yet today. Showing ${plain(b.day || b.date)}’s.</span>` : '';
   const stories = b.headlines || [];
   $('brief-count').textContent = stories.length ? `${stories.length} stories` : '';
   el.innerHTML = `
-    <div class="synthesis">${stale}${escapeHTML(b.synthesis)}</div>
+    <div class="synthesis">${stale}${plain(b.synthesis)}</div>
     <div class="stories">
       ${stories.map(h => `
         <details class="story">
           <summary>
-            <span class="story-cat">${escapeHTML(h.category)}</span>
-            <span class="story-title">${escapeHTML(h.title)}</span>
+            <span class="story-cat">${plain(h.category)}</span>
+            <span class="story-title">${plain(h.title)}</span>
           </summary>
           <div class="story-body">
-            <div class="story-sum">${escapeHTML(h.summary)}</div>
+            <div class="story-sum">${plain(h.summary)}</div>
             ${h.url ? `<a class="story-open" href="${safeHref(h.url)}" target="_blank" rel="noopener">Open story ↗</a>` : ''}
           </div>
         </details>`).join('')}

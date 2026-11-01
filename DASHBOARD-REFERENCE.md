@@ -609,7 +609,9 @@ The move out of `app.js` was checked to change nothing on the iPad: screenshots 
    - **"Read · N"**, collapsed, below the list: every done pick still in the archive (about 60 days, not just 14, so nothing vanishes), most recently marked first, dimmed, with a filled check that unmarks. Today's pick moves there too once done.
    - The mark is one `POST /reading-state` with the state key, retried once on a network error or 5xx (marking is idempotent). If it fails, the row moves back and the bar says "Couldn't save · try again", or "State key rejected · not saved".
 3. **Devotion:** verse, reference, title, excerpt, Read and Listen, the same data as the iPad card. Then **this week's readings** from `/lectionary`: each event's day ("Sunday, Nov 8", or "Today"), its name in the serif face, and the readings as label and reference. References only, no text and no links. Any `sources.lectionary` but `ok`, including `no-items`, shows **"Readings unavailable"**; an event without readings (Thanksgiving) shows "No readings listed".
-4. **Briefing:** the synthesis, then the headlines collapsed; tap one for its summary and "Open story ↗". A briefing not dated today gets the iPad's "No briefing yet today. Showing …'s." Everything is escaped (unlike the iPad card, which inserts the briefing's text as HTML; a separate fix was suggested).
+4. **Briefing:** the synthesis, then the headlines collapsed; tap one for its summary and "Open story ↗". A briefing not dated today gets the iPad's "No briefing yet today. Showing …'s." Everything is decoded, then escaped (unlike the iPad card, which inserts the briefing's text as HTML; a separate fix is underway).
+
+   **Upstream text arrives HTML-encoded**, an apostrophe as `&#39;`, in the briefing as in the sit-with picks. So every card's text goes through `plain()` in `shared.js` (decode, then escape), never `escapeHTML()` alone. On the first day live (2026-11-01) the briefing, devotion and readings used `escapeHTML()` alone and showed a literal `&#39;` for every apostrophe; the reading list already used `plain()` and was fine. Fixed the same day: run on made-up data with encoded apostrophes in every card, the merged code showed 8 literal `&#39;` and the fix none.
 5. **Footer:** which keys this device holds ("read key saved · state key not set") and "Change keys".
 
 ### Honest states
@@ -634,6 +636,7 @@ This is the part Clint cares about most: it should feel like the old Pocket or I
 ### Verified (2026-11-01, before committing)
 In Chromium (Playwright) with every request mocked by made-up data and the clock frozen at Monday Nov 2, 7:30am Chicago: screenshots at 393×852 and 430×932 (DPR 3), light and dark, sent to Clint and approved. Also each state above, the Read section open, and a tap on a check, which sent exactly one `POST` with `{url, done: true}` and showed the Undo bar. No state scrolls sideways at either width. The harness lived in the session's scratch space and wasn't committed. Two lessons from it for next time:
 - **Wait out `fetchRetry`'s 2.5s retry** before a screenshot, or failing cards are caught saying "Loading…".
+- **The made-up data has to carry the real feeds' habits.** It had plain apostrophes, so the `&#39;` bug above passed every screenshot and showed up on Clint's phone on the first evening. Mocked text now includes encoded apostrophes.
 - **Chromium's text rendering flips between two variants from run to run** (up to ~1,000 faint pixels), so "identical" means identical element geometry and text, plus pixels identical or differing only by that known flip. The unchanged page differs from itself that way.
 
 ## Refresh behavior
