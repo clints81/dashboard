@@ -1502,7 +1502,172 @@ const SITWITH = (() => {
       { headers: cors });
   }
 
-  return { record, handle };
+  // The URLs of every pick /sitwith can show (seed, archive, today's), for
+  // /reading-state: a mark is accepted only for one of these, and marks
+  // for anything else are dropped. { urls: Set, status } — status is the
+  // archive's ('ok' or 'unreadable'); a KV error throws.
+  async function knownUrls(env) {
+    const a = await readArchive(env);
+    if (a.status !== 'ok') return { urls: new Set(), status: a.status };
+    const current = entryFrom(await env.BRIEFING.get('latest'));
+    const urls = new Set(merge(SEED, a.items, [current]).map(e => e.url).filter(Boolean));
+    return { urls, status: 'ok' };
+  }
+
+  return { record, handle, knownUrls };
+})();
+
+// ═══════════════════════════════════════════════════════════════════════
+//  /reading-state route — which sit-with picks are marked "done"
+// ═══════════════════════════════════════════════════════════════════════
+//
+//  One top-level name — READING_STATE — plus one router line below.
+//
+//  Shared by the phone page and the iPad page so "done" on one shows on the
+//  other (Clint chose the Worker over a phone-only state, 2026-11-01).
+//
+//  Storage: KV key "reading-state" in env.BRIEFING, a JSON object of
+//  sit-with URL → { status: "done", at: <ISO time> }. Only URLs of picks
+//  /sitwith can still show are kept, so it's capped by the 60-pick archive.
+//
+//  Keys stay single-purpose (Clint's call, 2026-11-01): GET needs the read
+//  key, like the other personal routes; POST needs its own STATE_KEY, sent
+//  as X-State-Key. The read key keeps meaning read.
+//
+//  Why POST one change, not PUT the whole map: KV has no compare-and-swap.
+//  With a PUT, each device sends its own view and the last one silently
+//  erases the other's marks. A POST carries one change, {url, done}, and
+//  the Worker applies it to what's stored, one POST at a time per Worker
+//  instance. What's left: two changes reaching two different instances at
+//  the same moment, or within KV's propagation window (up to ~60 s) from two
+//  Cloudflare locations, can still lose one. For one reader marking a piece
+//  or two a day, accepted.
+//
+//  The write is narrow on purpose: it can change only this key, the body
+//  must be exactly {url, done}, and the URL must be a pick in the archive.
+// ═══════════════════════════════════════════════════════════════════════
+
+const READING_STATE = (() => {
+  const KEY = 'reading-state';
+  const MAX_BODY = 4096;
+
+  const cors = {
+    'access-control-allow-origin': '*',
+    'access-control-allow-methods': 'GET, POST, OPTIONS',
+    'access-control-allow-headers': 'X-Read-Key, X-State-Key, Content-Type',
+    'content-type': 'application/json; charset=utf-8',
+  };
+  const reply = (status, obj) =>
+    new Response(JSON.stringify(obj), { status, headers: { ...cors, 'cache-control': 'no-store' } });
+
+  // Same shape as READ_GATE, for the state key: unset fails closed (500),
+  // missing and wrong are 401s the page can tell apart, CORS on refusals.
+  function stateGate(request, env) {
+    const deny = (status, auth) => reply(status, { error: 'locked', sources: { auth } });
+    if (!env.STATE_KEY) return deny(500, 'STATE_KEY unset');
+    const sent = request.headers.get('X-State-Key');
+    if (!sent) return deny(401, 'missing');
+    if (sent !== env.STATE_KEY) return deny(401, 'rejected');
+    return null;
+  }
+
+  // { items, status }. Nothing stored is 'empty' (nothing marked yet). A KV
+  // error throws; a value that isn't a plain object is 'unreadable'.
+  async function read(env) {
+    const raw = await env.BRIEFING.get(KEY);
+    if (raw === null) return { items: {}, status: 'empty' };
+    try {
+      const items = JSON.parse(raw);
+      if (items && typeof items === 'object' && !Array.isArray(items)) return { items, status: 'ok' };
+    } catch {}
+    return { items: {}, status: 'unreadable' };
+  }
+
+  // Exactly {url: "http(s)://…", done: true|false}, nothing else.
+  function parseBody(text) {
+    let body;
+    try { body = JSON.parse(text); } catch { return null; }
+    if (!body || typeof body !== 'object' || Array.isArray(body)) return null;
+    const keys = Object.keys(body).sort();
+    if (keys.length !== 2 || keys[0] !== 'done' || keys[1] !== 'url') return null;
+    if (typeof body.done !== 'boolean' || typeof body.url !== 'string') return null;
+    if (!/^https?:\/\/\S+$/.test(body.url) || body.url.length > 2048) return null;
+    return body;
+  }
+
+  // POSTs reaching the same Worker instance run one at a time, so two
+  // changes sent together from the house (one instance, usually) can't
+  // read the same old map and overwrite each other. Different instances
+  // still can (see the header).
+  let queue = Promise.resolve();
+  function post(request, env) {
+    const run = queue.then(() => postNow(request, env));
+    queue = run.catch(() => {});
+    return run;
+  }
+
+  async function postNow(request, env) {
+    const locked = stateGate(request, env);
+    if (locked) return locked;
+
+    const text = await request.text();
+    if (text.length > MAX_BODY) return reply(413, { error: 'body too large' });
+    const body = parseBody(text);
+    if (!body) return reply(400, { error: 'expected exactly {"url": "https://…", "done": true|false}' });
+
+    // The URL must be a pick /sitwith can show. If the archive can't be
+    // read, nothing can be checked, so nothing is written.
+    let known;
+    try { known = await SITWITH.knownUrls(env); }
+    catch (e) { return reply(503, { error: `archive error: ${e.message}` }); }
+    if (known.status !== 'ok') return reply(503, { error: `archive ${known.status}` });
+    if (!known.urls.has(body.url)) return reply(400, { error: 'not a sit-with pick' });
+
+    // Unlike /otf, an unreadable value is not replaced: it holds marks
+    // nothing else can rebuild, so it's left for inspection.
+    let stored;
+    try { stored = await read(env); }
+    catch (e) { return reply(503, { error: `kv error: ${e.message}` }); }
+    if (stored.status === 'unreadable') return reply(500, { error: 'reading-state unreadable, not overwritten' });
+
+    // Keep only marks for picks that can still be shown (the cap).
+    const items = {};
+    for (const [url, v] of Object.entries(stored.items)) if (known.urls.has(url)) items[url] = v;
+    const pruned = Object.keys(stored.items).length - Object.keys(items).length;
+
+    const was = items[body.url];
+    if (body.done && !was) items[body.url] = { status: 'done', at: new Date().toISOString() };
+    if (!body.done) delete items[body.url];
+
+    // A change that changes nothing (marking twice) isn't written: KV's
+    // Free plan allows 1,000 writes a day.
+    const changed = Boolean(was) !== body.done || pruned > 0;
+    if (changed) await env.BRIEFING.put(KEY, JSON.stringify(items));
+    return reply(200, { ok: true, url: body.url, done: body.done, at: items[body.url]?.at ?? null, written: changed });
+  }
+
+  async function handle(request, env) {
+    if (request.method === 'OPTIONS') return new Response(null, { headers: cors });
+    if (request.method === 'POST') return post(request, env);
+
+    // GET: the read key, checked before anything else. Never cached: a mark
+    // made on the phone must show on the iPad's next load.
+    const locked = READ_GATE.check(request, env, cors);
+    if (locked) return locked;
+    if (request.method !== 'GET') return reply(405, { error: 'GET or POST only' });
+
+    let out;
+    try {
+      const { items, status } = await read(env);
+      out = { items, sources: { kv: status } };
+    } catch (e) {
+      out = { items: {}, sources: { kv: `error: ${e.message}` } };
+    }
+    out.generated = new Date().toISOString();
+    return reply(200, out);
+  }
+
+  return { handle };
 })();
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -1622,6 +1787,7 @@ export default {
     if (url.pathname === '/lectionary') return LECTIONARY.handle(request);
     if (url.pathname === '/sitwith') return SITWITH.handle(request, env);
     if (url.pathname === '/otf') return OTF.handle(request, env);
+    if (url.pathname === '/reading-state') return READING_STATE.handle(request, env);
 
     const cors = {
       "Access-Control-Allow-Origin": "*",

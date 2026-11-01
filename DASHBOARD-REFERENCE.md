@@ -24,6 +24,8 @@ Repo files:
 
 Everything in this repo is public and served by GitHub Pages. Secrets live in Cloudflare and 1Password, never here.
 
+`.DS_Store` (macOS Finder metadata) is in `.gitignore` since 2026-11-01. One was committed to `main` by accident that day; it records the names of files in its folder, so in a public repo it can leak them. It named only the `briefs` folder (already public in `.gitignore`), no brief files, and was removed.
+
 **Briefs** (since 2026-10-18): a brief written in the planning chat is saved to `briefs/` for Claude Code to read. The folder is in `.gitignore` because briefs can hold private context (the calendar brief named the family calendar and a trip), and committing one would publish it. Briefs aren't kept in git at all: once one is built, its decisions and reasons live in this file, so the brief is disposable.
 
 **The course** (since 2026-10-23): `course/` teaches Clint how the dashboard works using its own code, so he can follow Claude Code's tool calls, diffs, git steps and approval prompts, and ask sharper questions when something breaks. `course/README.md` is the index: a one-page map and a glossary (the 5-minute refresher), then seven ~10-minute lessons (what runs where; fetched vs. generated; keys and secrets; tool calls, diffs and tests; branches to deploys; approval prompts; when something breaks). Each lesson lists the files it depends on, and `CLAUDE.md` requires updating the matching lessons whenever a change affects architecture, data flow, keys or deployment. No secret values appear in it.
@@ -47,7 +49,7 @@ Everything in this repo is public and served by GitHub Pages. Secrets live in Cl
 |---|---|
 | Compatibility date / flags | `2026-08-30`, none (set when the Worker was made) |
 | Bindings | KV `BRIEFING` → `briefing-store` |
-| Secrets | `CAL_ICS_1`, `CAL_ICS_2`, `NOTION_TOKEN`, `READ_KEY`, `WRITE_KEY` |
+| Secrets | `CAL_ICS_1`, `CAL_ICS_2`, `NOTION_TOKEN`, `READ_KEY`, `WRITE_KEY`; `STATE_KEY` added Nov 2026 (see State key) |
 | Observability (Workers Logs) | on |
 | Triggers | `workers.dev` only: no routes, custom domains or crons |
 | Preview URLs | on (`preview_urls = true`, stated so it doesn't ride on wrangler's default) |
@@ -88,13 +90,15 @@ It serves these routes:
 | `/lectionary` | GET | This week's Sunday readings (CW 2021) from the WELSTech public calendar, references only. No secret. CORS `*`. 12-hr cache per day. See The lectionary route. |
 | `/otf` | PUT | Stores the otf-sync payload in KV (key `otf-sync`). Requires `X-Write-Key`, same key as `/`. A failed sync keeps the last good data. See The Orangetheory card. |
 | `/otf` | GET | Last good Orangetheory data plus the last sync attempt. **Requires `X-Read-Key`.** CORS `*`. 5-min cache, dropped on every PUT. |
+| `/reading-state` | GET | Which sit-with picks are marked done (KV key `reading-state`). **Requires `X-Read-Key`.** CORS `*`. Never cached. See The reading state. |
+| `/reading-state` | POST | Marks or unmarks one pick: body exactly `{url, done}`. **Requires `X-State-Key`** (its own key). See State key. |
 
-The write key is `WRITE_KEY` in this Worker's Cloudflare settings, with copies in 1Password, as the `DASHBOARD_WRITE_KEY` secret on the `briefing-retrieval` Worker, and as the `DASHBOARD_WRITE_KEY` Actions secret in `otf-sync`. Rotating it means updating all three. It was rotated 2026-10-08, when it came out of the Cowork task text. Never in the repo. The other secrets (`CAL_ICS_1`, `CAL_ICS_2`, `NOTION_TOKEN`, `READ_KEY`) are Worker secrets too, listed by name in `wrangler.toml`.
+The write key is `WRITE_KEY` in this Worker's Cloudflare settings, with copies in 1Password, as the `DASHBOARD_WRITE_KEY` secret on the `briefing-retrieval` Worker, and as the `DASHBOARD_WRITE_KEY` Actions secret in `otf-sync`. Rotating it means updating all three. It was rotated 2026-10-08, when it came out of the Cowork task text. Never in the repo. The other secrets (`CAL_ICS_1`, `CAL_ICS_2`, `NOTION_TOKEN`, `READ_KEY`, `STATE_KEY`) are Worker secrets too, listed by name in `wrangler.toml`.
 
-Each route is one top-level name in `dashboard-worker/src/index.js` (`handleSports`, `CALENDAR`, `TASKS`, `DEVOTION`, `LECTIONARY`, `SITWITH`, `OTF`) plus one line in the `fetch` router. Follow that convention when adding a route — it's what keeps per-route constants (each block has its own `CACHE_SECONDS`) from colliding.
+Each route is one top-level name in `dashboard-worker/src/index.js` (`handleSports`, `CALENDAR`, `TASKS`, `DEVOTION`, `LECTIONARY`, `SITWITH`, `OTF`, `READING_STATE`) plus one line in the `fetch` router. Follow that convention when adding a route — it's what keeps per-route constants (each block has its own `CACHE_SECONDS`) from colliding.
 
 ### Read key
-`/calendar`, `/tasks` and `/otf` return Clint's schedule, the church's payables and his workout data, so they need a read key. Every other route stays public, `/sitwith` included: the picks aren't personal, and the computer bookmark should show them without a key.
+`/calendar`, `/tasks`, `/otf` and `GET /reading-state` return Clint's schedule, the church's payables, his workout data and which pieces he's finished, so they need a read key. Every other route stays public, `/sitwith` included: the picks aren't personal, and the computer bookmark should show them without a key.
 
 Where the key lives:
 - `READ_KEY` secret in this Worker's Cloudflare settings
@@ -110,7 +114,31 @@ How it behaves:
 
 To rotate: generate a new value in 1Password ("Dashboard read key"), run `npx wrangler secret put READ_KEY` from `dashboard-worker/` and paste it at the hidden prompt (this deploys a new version of the live code with the new key; the other secrets carry over), then re-enter the key on each device. Devices show "Key rejected" until you do.
 
-**Rotated 2026-10-21.** During the calendar testing, a helper script passed the key to `curl` as a command-line argument, and a process listing taken to check progress showed it in a Claude Code session transcript. It never reached a file or the repo, but it was treated as exposed. So: **scripts that use the read or write key pass it to `curl` through stdin** (`curl -K -` fed a `header = "X-Read-Key: …"` line), never as an argument, since any process listing shows arguments.
+**Rotated 2026-10-21.** During the calendar testing, a helper script passed the key to `curl` as a command-line argument, and a process listing taken to check progress showed it in a Claude Code session transcript. It never reached a file or the repo, but it was treated as exposed. So: **scripts that use the read or write key pass it to `curl` through stdin** (`curl -K -` fed a `header = "X-Read-Key: …"` line), never as an argument, since any process listing shows arguments. The same goes for the state key.
+
+### State key
+Added 2026-11-01 (Stage 2 of the phone reading page). Marking a sit-with pick done, `POST /reading-state`, needs its own key, sent as `X-State-Key` and checked against the `STATE_KEY` secret.
+
+**Keys stay single-purpose (Clint's call, 2026-11-01).** Reusing the read key would have been less setup, since every device that marks also reads. Clint chose a separate key because separate keys have worked well so far: the read key keeps meaning read, and a leak of either costs less. The write key was never a candidate: it lives in programs (`briefing-retrieval`, otf-sync) and can overwrite the briefing, so it has no place in a phone's browser.
+
+Where the key lives, the read key's pattern exactly:
+- `STATE_KEY` secret in this Worker's Cloudflare settings
+- 1Password, item "Dashboard state key"
+- Each device's browser storage (`localStorage["dashStateKey"]`), entered once per device on the page (Stage 3)
+
+Never in the repo, the course, or a command-line argument.
+
+How it behaves: `stateGate()` in the `READING_STATE` block runs right after OPTIONS, before the body is read. An unset `STATE_KEY` fails closed with 500 `{"error":"locked","sources":{"auth":"STATE_KEY unset"}}`, no key gets 401 `missing`, a wrong key 401 `rejected`, all with CORS headers. The keys aren't interchangeable: the read key in `X-State-Key` is `rejected`, and the state key can't read the marks back. What the key opens is narrow (see The reading state): only the `reading-state` record, only `{url, done}`, only for a URL in the sit-with archive.
+
+**Setting it up** (Clint, once): generate a value in 1Password ("Dashboard state key"). Deploy the Stage 2 code first (`npm run deploy` from `dashboard-worker/`); until the secret is set, every POST answers `500 STATE_KEY unset`, which is the intended locked state. Then run `npx wrangler secret put STATE_KEY` from `dashboard-worker/` and paste the value at the hidden prompt (this deploys a new version of the live code with the key; the other secrets carry over). Check `npx wrangler secret list` shows six names.
+
+To check the key without changing anything, send a body the route refuses. It checks the key first, so the right key gets `400` and a wrong one `401 rejected`. The key goes through stdin, typed at a hidden prompt (`read -s` and `printf` are shell builtins, so it never appears in a process listing):
+
+```
+read -rs K; printf 'header = "X-State-Key: %s"\n' "$K" | curl -sS -K - -X POST -d '{}' https://briefing.clintsievers.workers.dev/reading-state; unset K
+```
+
+To rotate: new value in 1Password, `npx wrangler secret put STATE_KEY` from `dashboard-worker/`, then re-enter the key on each device. Devices show the "Key rejected" state when they try to mark something until you do. Only `briefing` holds it, so there's nothing else to update.
 
 ### Why a Worker exists at all
 The dashboard is served from `clints81.github.io`. Browsers refuse to let a page read a response from another origin unless that origin sends CORS headers saying it's allowed. Notion doesn't. `nytimes.com` doesn't. Server-side fetches aren't subject to that rule, so the Worker fetches on the dashboard's behalf and re-serves the result with `access-control-allow-origin: *`.
@@ -375,6 +403,26 @@ Returns `{items, sources, generated}`. Public, CORS `*`, `cache-control: no-stor
 - Upstream text can arrive entity-encoded (`&#39;`). The page decodes it, then escapes it. The hero card decodes too.
 - `renderSitArchive(data, 'YYYY-MM-DD')` is split from the fetch, so the Sunday card can be checked on any day from the console.
 
+### The reading state (since 2026-11-01)
+Which picks are done, shared between the phone and the iPad. Stage 2 of the phone reading page; no page reads or writes it until Stage 3.
+
+**Storage.** KV key `reading-state` in `env.BRIEFING`: a JSON object of sit-with URL → `{"status": "done", "at": "<ISO time>"}`. Unmarking deletes the entry, so only `done` is ever stored.
+
+**The cap.** Each write keeps only marks for URLs `/sitwith` can still show (the seed, the 60-pick archive, today's pick), so the record shrinks as picks fall out of the archive and never grows past about 60 entries. `SITWITH.knownUrls()` supplies that list.
+
+**`GET /reading-state`** (read key): `{items, sources: {kv}, generated}`. `kv` is `ok`, `empty` (nothing marked yet, not a fault), `unreadable` or `error: …`. **Never cached** (`no-store`, no edge copy): a mark made on the phone must show on the iPad's next load. KV reads are plentiful on the Free plan (100,000 a day).
+
+**`POST /reading-state`** (state key), body exactly `{"url": "https://…", "done": true|false}`:
+- Anything else is refused with 400 and the expected shape: not JSON, extra or missing fields, `done` as a string, a non-web URL. Over 4 KB is 413.
+- **The URL must be a sit-with pick** (400 `not a sit-with pick` otherwise), so the key can't be used to store arbitrary text. If the archive can't be read, nothing can be checked, so nothing is written (503).
+- Marking something already marked, or unmarking something not marked, writes nothing and keeps the first `at`. KV writes are the Free plan's tight limit (1,000 a day).
+- An unreadable `reading-state` is refused (500) and **left as it is**, as with the sit-with archive: it holds marks nothing can rebuild. To reset it, delete the key in the KV namespace.
+- The answer is `{ok, url, done, at, written}`, never the whole map: reading the marks is the read key's job.
+
+**Why one change per POST, not a PUT of the whole map** (the brief left this choice to Claude Code). KV has no compare-and-swap, so a write can't say "only if nothing changed since I read". With a PUT, each device sends its own view and the last one silently erases the other's marks. A POST carries one change, which the Worker applies to what's stored, and POSTs reaching the same Worker instance run one at a time (an in-memory queue). What's left: two changes reaching two different instances at the same moment, or within KV's propagation window (up to about 60 seconds) from two Cloudflare locations, can lose one. For one reader marking a piece or two a day, accepted; the lost mark would show as not done on the next load.
+
+**Testing.** `npm run test:reading-state` from `dashboard-worker/` runs `scripts/reading-state-test.mjs`: 38 checks through the Worker's real handler with an in-memory KV and made-up keys. It covers the key gates both ways (missing, wrong, unset, and the read key in the state key's place), every refused body, the archive check, marking twice and unmarking without a KV write, the cap, two marks sent at once, a refused POST not jamming the queue, and an unreadable archive, an unreadable record and KV down. Each safeguard was removed in turn to confirm the test catches it.
+
 ---
 
 ## The briefing system
@@ -572,9 +620,8 @@ Another (Nov 1): **a rendered view can hide the very character that matters.** T
 - Cleaner Worker URL via a `clintsievers.com` subdomain (deliberately deferred)
 - ~~git for the Worker~~ — **done**; deployed with wrangler since 2026-10-20 (see The Worker).
 - **Bible card:** this Sunday's lectionary readings, as references only. The `/lectionary` route is **built** (2026-11-01, see The lectionary route); the readings show on the phone reading page's devotion card (below).
-- **Phone reading page** (brief of 2026-11-01, built in three stages, each approved by Clint before the next). Stage 1, `/lectionary`, is built. Still to build:
-  - **Stage 2, synced "done" state:** KV key `reading-state`, a map of sit-with URL → `{status: "done", at}`, trimmed to picks still in the 60-pick archive. `GET /reading-state` needs the read key; the write needs **a new, separate state key** (Worker secret such as `STATE_KEY`, 1Password item, its own browser storage and header), set up exactly like the read key. **Keys stay single-purpose (Clint's call):** the read key keeps meaning read, because separate keys have worked well so far. The write can change only `reading-state` and refuses any other body shape.
-  - **Stage 3, the page:** `read.html` with its own manifest (portrait), and shared code (`shared.js`: Worker URL, `fetchRetry`, key helpers, `chicagoDate()`, decode/escape, the `/sitwith` fetch) loaded by both pages, since two pages rendering the same data drift apart. The iPad page must look identical before and after (screenshots at 1194×834). The iPad shows a quiet done mark on picks marked done, nothing else.
+- **Phone reading page** (brief of 2026-11-01, built in three stages, each approved by Clint before the next). Stage 1, `/lectionary`, is built (see The lectionary route). Stage 2, the synced "done" state and its state key, is built (see The reading state and State key). Still to build:
+  - **Stage 3, the page:** `read.html` with its own manifest (portrait), the state key entered once per device (`localStorage["dashStateKey"]`, sent as `X-State-Key`), and shared code (`shared.js`: Worker URL, `fetchRetry`, key helpers, `chicagoDate()`, decode/escape, the `/sitwith` fetch) loaded by both pages, since two pages rendering the same data drift apart. The iPad page must look identical before and after (screenshots at 1194×834). The iPad shows a quiet done mark on picks marked done, nothing else.
   - **Decisions behind it:** a **separate page, not a responsive iPad page**: the phone is for reading and the iPad for a short morning glance, and the iPad page is tuned to 1194 wide with a landscape-locked manifest. **No full-text reader view:** most sit-with sources are paywalled, so the Worker would mostly fetch teasers, and serving article text from a public site would republish other people's work; a tap opens the publisher, where Clint's subscriptions live (links from a home-screen app open in the right app, logged in, checked 2026-11-01). **Phone cards:** reading list, devotion plus this week's readings, weather, briefing; not teams, Orangetheory, Treasurer tasks or calendar, which are easy to reach on the phone already or are busy next to long reading. **"Done" syncs between phone and iPad**, stored in the Worker, chosen over a phone-only state so there's less to manage later. **Unread picks age out after 14 days** rather than piling up; done ones stay in a collapsed "Read" section. One pick a day is enough for now: no new collecting. The calendar's CPU overrun stays as decided on 2026-10-21.
 - **Retrieval shortlist (mock up, decide later):** the judge returns two to four "also worth your time" pieces from the sit-with pool alongside the daily pick, shown on the phone page. Clint likes more options but is wary of clutter, so it needs a mockup before a decision.
 - **Check the lectionary feed before Advent 2028.** Its last event is Nov 26, 2028; from Nov 27, 2028, `/lectionary` reads `no-items` until WELSTech extends the calendar (or publishes a new one, whose URL would replace `FEED`). Look in autumn 2028.

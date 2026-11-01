@@ -23,7 +23,7 @@ Your dashboard is four programs running in four places, plus the services they b
   │  private repo,    │  │  fetches for the page: sports, calendar,  │
   │  NOT in this repo)│  │  Notion tasks, devotion, lectionary       │
   └───────────────────┘  └──────────────▲───────────────────────────┘
-       PUT /otf (write key)             │ GET (read key for 3 routes)
+       PUT /otf (write key)             │ GET (read key for 4 routes)
                                         │
                          ┌──────────────┴───────────────────────────┐
   when you open it       │  the page  (your iPad's browser)          │

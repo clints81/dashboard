@@ -60,7 +60,7 @@ Each term gets a plain definition, the general name for it (so it carries over t
 
 **Secret.** A value that grants access and must never be published: a key, token or password. *Where:* never in the repo. Listed by name only in the comments at the bottom of each `wrangler.toml`.
 
-**Read key / write key.** Your two dashboard keys. The read key lets a device see the three private routes; the write key lets a program change what's stored. Lesson 3 covers both.
+**Read key / write key / state key.** Your three dashboard keys. The read key lets a device see the four private routes; the write key lets a program change what's stored; the state key lets a device mark a sit-with piece done. Each does one job. Lesson 3 covers all three.
 
 **Token.** A secret issued by a service (Notion, Anthropic) that lets a program act as you there. *Where:* `NOTION_TOKEN`, `ANTHROPIC_API_KEY` named in `briefing-retrieval/wrangler.toml`.
 
