@@ -23,4 +23,4 @@ id = "ab2166e0a65047fda19e4cd9f4601ee8"
 enabled = true
 
 # Secrets (set with `npx wrangler secret put <NAME>`, never committed):
-#   CAL_ICS_1, CAL_ICS_2, NOTION_TOKEN, READ_KEY, WRITE_KEY
+#   CAL_ICS_1, CAL_ICS_2, NOTION_TOKEN, READ_KEY, STATE_KEY, WRITE_KEY

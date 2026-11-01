@@ -71,6 +71,7 @@ export default {
     if (url.pathname === '/lectionary') return LECTIONARY.handle(request);
     if (url.pathname === '/sitwith') return SITWITH.handle(request, env);
     if (url.pathname === '/otf') return OTF.handle(request, env);
+    if (url.pathname === '/reading-state') return READING_STATE.handle(request, env);
 ```
 
 Anything that isn't one of those falls through to the root route `/`: `GET` returns today's briefing from storage, `PUT` stores a new one. `fetch` here means "a request arrived". Your Workers only run when something calls them or a timer fires; between calls they don't exist.

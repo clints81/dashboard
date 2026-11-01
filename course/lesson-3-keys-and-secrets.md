@@ -2,7 +2,7 @@
 
 *About 10 minutes.*
 
-**Depends on:** `app.js` (read-key section, `fetchRetry`), `dashboard-worker/src/index.js` (`READ_GATE`, the root `PUT`, `OTF`), `dashboard-worker/wrangler.toml`, `briefing-retrieval/wrangler.toml`, `briefing-retrieval/.dev.vars.example`, `briefing-retrieval/src/judge.js` (`putDashboard`), both Worker `.gitignore` files, `DASHBOARD-REFERENCE.md` (Read key, The write key paragraph, The Git build outage, otf-sync)
+**Depends on:** `app.js` (read-key section, `fetchRetry`), `dashboard-worker/src/index.js` (`READ_GATE`, the root `PUT`, `OTF`, `READING_STATE`), `dashboard-worker/wrangler.toml`, `briefing-retrieval/wrangler.toml`, `briefing-retrieval/.dev.vars.example`, `briefing-retrieval/src/judge.js` (`putDashboard`), both Worker `.gitignore` files, `DASHBOARD-REFERENCE.md` (Read key, State key, The reading state, The write key paragraph, The Git build outage, otf-sync)
 
 *No secret values appear in this lesson. `<READ_KEY>` and similar are placeholders.*
 
@@ -11,7 +11,7 @@
 A **secret** is any value that, on its own, lets someone do something: read your data, change your data, or spend your money. Keys, tokens, passwords and secret links are all secrets. Three rules carry over to every project:
 
 1. **A secret lives in a secret store, never in code.** Code gets published, copied and kept in history forever. Secret stores (Cloudflare's Worker secrets, GitHub Actions secrets, 1Password) are built to hold values that programs can use but people can't casually read.
-2. **Each secret should allow as little as possible.** Your read key can read but not write. Your write key can write but not read. A leak of one doesn't hand over everything.
+2. **Each secret should allow as little as possible.** Your read key can read but not write. Your write key can write but not read. Your state key can mark a sit-with piece done or not done, and nothing else. A leak of one doesn't hand over everything.
 3. **A secret that might have leaked gets rotated, not deleted.** Removing it from a file doesn't remove it from git history, a log, a screenshot or a chat transcript. Only a new value makes the old one useless.
 
 Your repo is **public**, and so is `app.js` (anyone can view a web page's source). That's why rule 1 is absolute here.
@@ -20,7 +20,7 @@ Your repo is **public**, and so is `app.js` (anyone can view a web page's source
 
 ### The read key: lets a device see your private cards
 
-Three routes return personal data: `/calendar` (your schedule), `/tasks` (the church's payables) and `/otf` (your workouts). They need the read key. The check is `READ_GATE` in `dashboard-worker/src/index.js`:
+Four routes return personal data: `/calendar` (your schedule), `/tasks` (the church's payables), `/otf` (your workouts) and `GET /reading-state` (which pieces you've finished). They need the read key. The check is `READ_GATE` in `dashboard-worker/src/index.js`:
 
 ```js
   function check(request, env, cors) {
@@ -71,6 +71,21 @@ Where the write key lives, all the same value:
 
 Rotating it means updating all three programs' copies plus 1Password. Miss one and that program's deliveries start failing with 403.
 
+### The state key: lets a device mark a piece read
+
+Added Nov 1, 2026 for the phone reading page. Marking a sit-with pick "done" (`POST /reading-state`) needs its own key, sent as `X-State-Key`. The check is `stateGate()` in the `READING_STATE` block, the same shape as `READ_GATE`: unset fails closed, missing and wrong are 401s.
+
+**Why not reuse the read key?** It would have been less to set up: the phone needs the read key anyway. You decided keys stay single-purpose, because separate keys have worked well so far. A read key that could also write would quietly stop meaning "read", and a leak of it would cost more. Rule 2 again.
+
+**Why not the write key?** That one lives in programs (`briefing-retrieval`, otf-sync) and can overwrite the briefing. A browser on your phone shouldn't hold it.
+
+The write it opens is deliberately narrow: it can change only the `reading-state` record, the body must be exactly `{"url": …, "done": true|false}`, and the URL must be a pick in the sit-with archive. So even a leaked state key can only mark your own picks read or unread.
+
+Where the state key lives:
+- Cloudflare: the `STATE_KEY` secret on the `briefing` Worker
+- 1Password: item "Dashboard state key"
+- Each device's browser storage (`localStorage["dashStateKey"]`), typed in once per device (from Stage 3 of the phone page)
+
 ### Everything else, by name only
 
 | Secret | Held by | What someone holding it could do |
@@ -87,7 +102,7 @@ The repo only ever names them. The bottom of `dashboard-worker/wrangler.toml`:
 
 ```toml
 # Secrets (set with `npx wrangler secret put <NAME>`, never committed):
-#   CAL_ICS_1, CAL_ICS_2, NOTION_TOKEN, READ_KEY, WRITE_KEY
+#   CAL_ICS_1, CAL_ICS_2, NOTION_TOKEN, READ_KEY, STATE_KEY, WRITE_KEY
 ```
 
 For running a Worker on a laptop, `briefing-retrieval/.dev.vars.example` is a template with empty values. The real copy, `.dev.vars`, is listed in that folder's `.gitignore`, so git can't commit it.
@@ -102,7 +117,7 @@ These are in `DASHBOARD-REFERENCE.md`, and they're the patterns to watch for:
 
 ## What it looks like when Claude Code is working on it
 
-- **`npx wrangler secret list`** shows secret *names* only. Safe to approve. Claude Code runs it before a deploy to confirm all five are there.
+- **`npx wrangler secret list`** shows secret *names* only. Safe to approve. Claude Code runs it before a deploy to confirm all six are there (five until `STATE_KEY` was added in Nov 2026).
 - **`npx wrangler secret put READ_KEY`** asks for the value at a hidden prompt. That's where the value should go: typed or pasted by you into a terminal, never into the chat. It also deploys a new version of the Worker with the new value.
 - **`curl -H "X-Read-Key: …"`** in a command Claude Code wants to run is a warning sign. The value would show in the command line. Ask it to use the stdin pattern instead.
 - **A diff that adds a long random-looking string** to any file is a hard stop. Ask what it is before approving.
@@ -135,7 +150,13 @@ The key would sit in the command line, where any process listing (and the sessio
 </details>
 
 <details>
-<summary>5. A key was committed to the repo and removed in the very next commit, ten minutes later. Is it safe now?</summary>
+<summary>5. Someone gets your state key. What can they do?</summary>
+
+Mark or unmark sit-with picks as done. Nothing else: the route only accepts `{url, done}` for a URL already in the archive, and the state key can't even read the marks back (that's the read key's job). Annoying, not harmful. Still rotate it: new value in 1Password, `npx wrangler secret put STATE_KEY`, re-enter on each device.
+</details>
+
+<details>
+<summary>6. A key was committed to the repo and removed in the very next commit, ten minutes later. Is it safe now?</summary>
 
 No. It's still in git history, and the repo is public, so anyone can see the earlier commit. Rotate it.
 </details>

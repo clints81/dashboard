@@ -1,3 +1,8 @@
 # Briefs from the planning chat. Local only: they can hold private
 # context, and this repo is public. Decisions go in DASHBOARD-REFERENCE.md.
 briefs/
+
+# macOS Finder metadata. It records file names in its folder, and this repo
+# is public. One was committed by accident on 2026-11-01 (it named only the
+# briefs folder) and removed.
+.DS_Store
