@@ -246,10 +246,10 @@ async function loadSports() {
     }
 
     el.innerHTML = items.map(it => `
-      <a class="sport-item" href="${it.url}" target="_blank" rel="noopener">
-        <div class="sport-item-tag">${it.team || it.league}</div>
-        <div class="sport-item-title">${it.title}</div>
-        ${it.desc && it.team ? `<div class="sport-item-desc">${it.desc}</div>` : ''}
+      <a class="sport-item" href="${safeHref(it.url)}" target="_blank" rel="noopener">
+        <div class="sport-item-tag">${plain(it.team || it.league)}</div>
+        <div class="sport-item-title">${plain(it.title)}</div>
+        ${it.desc && it.team ? `<div class="sport-item-desc">${plain(it.desc)}</div>` : ''}
       </a>
     `).join('') + `<div class="sport-credit">via The Athletic</div>`;
 
@@ -804,6 +804,10 @@ function renderWorkout() {
 // The briefing-retrieval Worker PUTs today's JSON to the dashboard Worker
 // overnight. The dashboard Worker serves it back publicly, with CORS headers
 // so the browser can read it. No key needed to read.
+//
+// Its text arrives HTML-encoded (an apostrophe as &#39;), so every value
+// goes through plain() from shared.js (decode, then escape), never
+// escapeHTML() alone, which would show "&#39;" on the page.
 
 const BRIEFING_URL = `${WORKER}/`;
 
@@ -826,20 +830,22 @@ async function loadBriefing() {
     // ── Synthesis ──
     if (synthesisEl) {
       synthesisEl.innerHTML = isToday
-        ? `<span class="briefing-lede">${briefing.synthesis}</span>`
-        : `<span style="color:var(--ink-4);font-style:italic">No briefing yet today. Showing ${briefing.day}'s.</span> ${briefing.synthesis}`;
+        ? `<span class="briefing-lede">${plain(briefing.synthesis)}</span>`
+        : `<span style="color:var(--ink-4);font-style:italic">No briefing yet today. Showing ${plain(briefing.day)}'s.</span> ${plain(briefing.synthesis)}`;
     }
 
     // ── Headlines ──
+    // A real link, not an inline onclick: a URL inside onclick="…('…')" is
+    // JavaScript inside HTML, and one apostrophe or quote in it breaks out.
     if (headlinesEl && briefing.headlines?.length) {
       headlinesEl.innerHTML = briefing.headlines.map(h => `
-        <div class="headline-item" onclick="window.open('${h.url}','_blank')">
-          <span class="headline-cat">${h.category}</span>
+        <a class="headline-item" href="${safeHref(h.url)}" target="_blank" rel="noopener">
+          <span class="headline-cat">${plain(h.category)}</span>
           <span class="headline-text">
-            <strong>${h.title}</strong><br>
-            <span class="headline-sum">${h.summary}</span>
+            <strong>${plain(h.title)}</strong><br>
+            <span class="headline-sum">${plain(h.summary)}</span>
           </span>
-        </div>
+        </a>
       `).join('');
       const countEl = $('briefing-count');
       if (countEl) countEl.textContent = `${briefing.headlines.length} stories`;

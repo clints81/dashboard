@@ -143,9 +143,11 @@ Sources added for it (sit-with pool), chosen by Clint:
 ### Same dashboard, no dashboard changes
 The Worker PUTs the same JSON shape Cowork did to the dashboard Worker
 through the existing service binding (same-account `workers.dev`
-fetches fail with error 1042). The dashboard renders `title`, `summary`,
+fetches fail with error 1042). The dashboard rendered `title`, `summary`,
 `category` and `synthesis` with `innerHTML`, so the Worker HTML-escapes
-those; `sit_with` uses `textContent` and is sent raw.
+those; `sit_with` uses `textContent` and is sent raw. Since 2026-11-01
+both dashboard pages decode and escape this text themselves, so the
+Worker's escaping is a harmless second layer (see the reference doc).
 
 ### Shadow mode until cutover (cut over 2026-10-08)
 `PUBLISH` gates every outward write (dashboard, KV story log, both
