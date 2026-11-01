@@ -92,7 +92,7 @@ Each term gets a plain definition, the general name for it (so it carries over t
 
 **Version / rollback.** Every Worker deploy creates a version; a rollback makes an older version live again. *Where:* "The Git build outage" in `DASHBOARD-REFERENCE.md`.
 
-**npm / package / dependency.** npm installs other people's code (packages) your code depends on. `package.json` lists them; `package-lock.json` pins exact versions. *Where:* `ical.js` in `dashboard-worker/package.json`, pinned to `2.2.1`.
+**npm / package / dependency.** npm installs other people's code (packages) your code depends on. `package.json` lists them; `package-lock.json` pins exact versions. `npm audit` checks those versions against published security advisories; a hit in a dev tool like wrangler (which never ships to Cloudflare) matters less than one in code that does, but still gets fixed, in the repo's lockfile rather than on one machine. *Where:* `ical.js` in `dashboard-worker/package.json`, pinned to `2.2.1`; wrangler, the deploy tool, in the same file.
 
 **Syntax check.** Checking that a file is valid code without running it. *Where:* `node --check` on every JS file, required by `CLAUDE.md`.
 
