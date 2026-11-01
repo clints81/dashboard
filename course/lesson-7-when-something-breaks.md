@@ -43,6 +43,7 @@ Then write the question with all four in it.
 | **A team missing from sports** | One feed blocked, or genuinely a quiet day | "What does the `/sports` `sources` block say for that team's feed?" |
 | **Tasks "unavailable"** | Notion (`sources.notion`) | "Is it `HTTP 401` (token) or `HTTP 404` (the connection lost access to the database)?" |
 | **Devotion "unavailable"** | The WELS feed (`sources.wels`) | "Is it `parse-miss`? Did WELS change its template?" |
+| **This week's readings missing** | The WELSTech lectionary calendar (`/lectionary`, `sources.lectionary`) | "Is it `HTTP nnn` or `not-ics` (download), `parse-miss` (the description changed shape), or `no-items` (the feed has run out; it ends Nov 2028)?" |
 | **Orangetheory "sync failed" or "Not updated since…"** | otf-sync, in the **other repo** | "What did the last otf-sync Actions run report for `login` and `workouts`?" (needs a session on `otf-sync`) |
 | **Orangetheory "Partial: …"** | otf-sync's `parse` check: a class it couldn't read | "What's in `sources.parse` and `new_class_types`?" |
 | **"No monthly post for November yet."** | Not a fault. The month's Notion row is missing. | Nothing: add the row in "OTF Monthly Posts" and paste the post. |

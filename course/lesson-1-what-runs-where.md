@@ -68,6 +68,7 @@ export default {
     if (url.pathname === '/calendar') return CALENDAR.handle(request, env);
     if (url.pathname === '/tasks') return TASKS.handle(request, env);
     if (url.pathname === '/devotion') return DEVOTION.handle(request);
+    if (url.pathname === '/lectionary') return LECTIONARY.handle(request);
     if (url.pathname === '/sitwith') return SITWITH.handle(request, env);
     if (url.pathname === '/otf') return OTF.handle(request, env);
 ```

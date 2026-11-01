@@ -21,7 +21,7 @@ Your dashboard is four programs running in four places, plus the services they b
   │ otf-sync          │  │  dashboard-worker/                        │
   │ (GitHub Action,   │──▶  stores: briefing, sit-with archive, OTF  │
   │  private repo,    │  │  fetches for the page: sports, calendar,  │
-  │  NOT in this repo)│  │  Notion tasks, devotion                   │
+  │  NOT in this repo)│  │  Notion tasks, devotion, lectionary       │
   └───────────────────┘  └──────────────▲───────────────────────────┘
        PUT /otf (write key)             │ GET (read key for 3 routes)
                                         │

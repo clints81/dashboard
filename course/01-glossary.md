@@ -14,7 +14,7 @@ Each term gets a plain definition, the general name for it (so it carries over t
 
 **Worker (Cloudflare Worker).** Cloudflare's name for a *serverless function*: a small program that runs on Cloudflare's machines when a request arrives or a timer fires, with no server for you to manage. *Where:* `dashboard-worker/src/index.js` (named `briefing`), `briefing-retrieval/src/index.js` (named `briefing-retrieval`).
 
-**Proxy.** A go-between that fetches something on your behalf. The `briefing` Worker is a proxy for sports, calendar, Notion and the devotion, because the browser isn't allowed to fetch those itself (see CORS). *Where:* the comment "Why a Worker exists at all" in `DASHBOARD-REFERENCE.md`.
+**Proxy.** A go-between that fetches something on your behalf. The `briefing` Worker is a proxy for sports, calendar, Notion, the devotion and the lectionary, because the browser isn't allowed to fetch those itself (see CORS). *Where:* the comment "Why a Worker exists at all" in `DASHBOARD-REFERENCE.md`.
 
 **GitHub Action.** GitHub's *scheduled job / CI runner*: code GitHub runs on its own machines on a schedule or when something happens in a repo. *Where:* only in the private `otf-sync` repo, not this one.
 
@@ -32,7 +32,7 @@ Each term gets a plain definition, the general name for it (so it carries over t
 
 **Service binding.** A binding to another Worker, so one Worker can call another directly. *Where:* `DASHBOARD` and `COWORK` in `briefing-retrieval/wrangler.toml`, both pointing at `briefing`. This is why the `briefing` Worker's name must never change.
 
-**Cache.** A saved copy of an answer, reused for a while so the work isn't redone. *Where:* `CACHE_SECONDS` in each route of `dashboard-worker/src/index.js` (20 minutes for sports, 5 for calendar and tasks, 3 hours for devotion).
+**Cache.** A saved copy of an answer, reused for a while so the work isn't redone. *Where:* `CACHE_SECONDS` in each route of `dashboard-worker/src/index.js` (20 minutes for sports, 5 for calendar and tasks, 3 hours for devotion, 12 hours for the lectionary).
 
 **Config file.** Settings kept apart from code so they can change without touching logic. *Where:* `config.js` (the page's settings: location, caps, fallbacks) and `wrangler.toml` (each Worker's settings).
 
@@ -52,7 +52,7 @@ Each term gets a plain definition, the general name for it (so it carries over t
 
 **API.** A service's front door for programs rather than people. *Where:* Open-Meteo in `loadWeather()`, the Notion and Claude APIs inside the Workers.
 
-**RSS / feed.** A machine-readable list of a site's latest items. *Where:* the sports feeds and the WELS devotion feed in `dashboard-worker/src/index.js`; the news sources in `briefing-retrieval/src/sources.js`.
+**RSS / feed.** A machine-readable list of a site's latest items. *Where:* the sports feeds, the WELS devotion feed and the lectionary calendar (a calendar file, ICS, read like a feed) in `dashboard-worker/src/index.js`; the news sources in `briefing-retrieval/src/sources.js`.
 
 **localStorage.** A small storage area in one browser on one device, kept between visits. *Where:* `localStorage.getItem('dashReadKey')` in `app.js`; it's where each device keeps the read key.
 
@@ -92,7 +92,7 @@ Each term gets a plain definition, the general name for it (so it carries over t
 
 **Version / rollback.** Every Worker deploy creates a version; a rollback makes an older version live again. *Where:* "The Git build outage" in `DASHBOARD-REFERENCE.md`.
 
-**npm / package / dependency.** npm installs other people's code (packages) your code depends on. `package.json` lists them; `package-lock.json` pins exact versions. *Where:* `ical.js` in `dashboard-worker/package.json`, pinned to `2.2.1`.
+**npm / package / dependency.** npm installs other people's code (packages) your code depends on. `package.json` lists them; `package-lock.json` pins exact versions. `npm audit` checks those versions against published security advisories; a hit in a dev tool like wrangler (which never ships to Cloudflare) matters less than one in code that does, but still gets fixed, in the repo's lockfile rather than on one machine. *Where:* `ical.js` in `dashboard-worker/package.json`, pinned to `2.2.1`; wrangler, the deploy tool, in the same file.
 
 **Syntax check.** Checking that a file is valid code without running it. *Where:* `node --check` on every JS file, required by `CLAUDE.md`.
 
