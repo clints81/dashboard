@@ -422,9 +422,11 @@ export function verify(out, { byId, date, refMs, ctx }) {
 
 // ── Dashboard payload ────────────────────────────────────────────────────
 
-// The dashboard inserts title, summary, category and synthesis with
-// innerHTML, and the URL inside onclick="window.open('…')". sit_with uses
-// textContent, so it goes raw.
+// Escaped for the dashboard, which until 2026-11-01 inserted title,
+// summary, category and synthesis with innerHTML as-is, and the URL inside
+// onclick="window.open('…')". Both pages now decode and escape this text
+// themselves (plain() in shared.js), so this is a harmless second layer.
+// sit_with goes raw.
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 const safeUrl = u => String(u).replace(/'/g, '%27').replace(/"/g, '%22').replace(/</g, '%3C').replace(/>/g, '%3E');
 
