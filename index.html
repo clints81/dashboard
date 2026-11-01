@@ -827,6 +827,14 @@
     .week-meta { font-size: 10.5px; color: var(--ink-4); letter-spacing: 0.04em; }
     .week-note { font-size: 12.5px; color: var(--ink-3); font-style: italic; }
 
+    /* Done marks, synced from the phone (/reading-state, read key). Quiet on
+       purpose: a small check and a dimmer headline, nothing that moves. */
+    .sit-inner.is-done .sit-meta::after { content: '  ·  ✓ Read'; color: oklch(0.70 0.09 40); }
+    .sit-past-row.is-done .sit-past-head::before { content: '✓  '; color: oklch(0.70 0.09 40); }
+    .sit-past-row.is-done .sit-past-head { opacity: .55; }
+    .week-item.is-done .week-kicker::after { content: '  ·  ✓ Read'; color: var(--accent); }
+    .week-item.is-done .week-head { opacity: .6; }
+
     /* ── Divider between the reading half and the glance half ── */
     .band {
       grid-column: span 12;
@@ -1009,6 +1017,7 @@
 </div><!-- /shell -->
 
 <script src="config.js"></script>
+<script src="shared.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

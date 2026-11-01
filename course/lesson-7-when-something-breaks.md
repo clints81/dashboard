@@ -2,7 +2,7 @@
 
 *About 12 minutes.*
 
-**Depends on:** `app.js` (`fetchRetry`, `renderLocked`, each `load…` function's error branch), `dashboard-worker/src/index.js` (each route's `sources` block, `READ_GATE`), `briefing-retrieval/src/judge.js` (`failureEdition`, status lines), `briefing-retrieval/README.md` (endpoints), `DASHBOARD-REFERENCE.md` (every route section, The Git build outage, Recurring lesson, Backlog)
+**Depends on:** `shared.js` (`fetchRetry`, `fetchReadingState`), `app.js` (`renderLocked`, each `load…` function's error branch), `read.js` (key lines, `setDone`), `dashboard-worker/src/index.js` (each route's `sources` block, `READ_GATE`), `briefing-retrieval/src/judge.js` (`failureEdition`, status lines), `briefing-retrieval/README.md` (endpoints), `DASHBOARD-REFERENCE.md` (every route section, The Git build outage, Recurring lesson, Backlog)
 
 ## The concept
 
@@ -27,10 +27,12 @@ Then write the question with all four in it.
 
 | You see | Likely place | Ask Claude Code |
 |---|---|---|
-| **Everything blank**, even weather and the clock | The page: a syntax error in `app.js`, or the iPad is offline | "Did a change to `app.js` merge recently? Does `node --check app.js` pass on `main`?" |
+| **Everything blank**, even weather and the clock | The page: a syntax error in `app.js` (or `shared.js`, which both pages load), or the device is offline | "Did a change to `app.js` or `shared.js` merge recently? Does `node --check` pass on them on `main`?" |
 | **Weather and On this day fine, every Worker card failing** | The `briefing` Worker: a bad deploy or missing binding (Oct 20) | "What version of the `briefing` Worker is live and when was it deployed? Does `GET /` return briefing JSON?" |
 | **"Locked on this device"** on one device | That device has no read key stored. Not a fault. | Nothing. Tap Enter key and paste from 1Password. |
-| **Marking a piece done fails** | `POST /reading-state`: `401 missing` or `rejected` is the state key; `500 STATE_KEY unset` means the secret was never set; `503 archive …` means the sit-with archive couldn't be read, so nothing was written | "What status and error did the POST get?" |
+| **Phone: "Read marks locked on this device"** | The phone has no read key, so it can't tell what's done (every pick shows as unread). Not a fault. | Nothing. Tap Enter key and paste "Dashboard read key" from 1Password. |
+| **Phone: "Marking locked on this device"** | The phone has the read key but not the state key. The checks are faded on purpose. | Nothing. Tap Enter key and paste "Dashboard state key". |
+| **Phone: "Couldn't save · try again"** or **"State key rejected"** after a tap | The row moved back: the Worker refused or couldn't be reached | `POST /reading-state`: `401 missing` or `rejected` is the state key; `500 STATE_KEY unset` means the secret was never set; `503 archive …` means the sit-with archive couldn't be read, so nothing was written | "What status and error did the `POST /reading-state` get?" |
 | **"Key rejected"** on calendar, tasks and Orangetheory | `READ_KEY` changed (rotation, `secret put`) or the device has an old key | "Was `READ_KEY` changed recently? Which version is live?" |
 | **Calendar, tasks and Orangetheory all "unavailable"** at once | The Worker may be refusing with 500 `READ_KEY unset` (fails closed) | "Run `wrangler secret list` for `briefing`. Are all five secrets there?" |
 | **"Calendar unavailable"** now and then, fine on reload | Known: `/calendar` exceeds the Free plan's CPU limit and is sometimes killed (error 1102). Accepted on Oct 21. | Only if it's frequent: "How often is `/calendar` hitting 1102 this week, from `wrangler tail`?" |

@@ -19,7 +19,7 @@ The general distinction is *deterministic* versus *model* output. Deterministic 
 
 ### Only one card is generated
 
-Of the nine loaders in `app.js`, only `loadBriefing()` shows model-written text. Everything else is fetched. Even the sports card, which looks "curated", is picked by fixed rules: a story counts as a Cubs story if the Cubs are in its web address, not because anything read and judged it (see "Matching strategy" in `DASHBOARD-REFERENCE.md`).
+Of the ten loaders in `app.js`, only `loadBriefing()` shows model-written text (on the phone, `renderBriefing()` in `read.js` shows the same briefing). Everything else is fetched. Even the sports card, which looks "curated", is picked by fixed rules: a story counts as a Cubs story if the Cubs are in its web address, not because anything read and judged it (see "Matching strategy" in `DASHBOARD-REFERENCE.md`).
 
 ### The model is told it may only use what it's given
 

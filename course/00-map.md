@@ -2,7 +2,7 @@
 
 *Layer 1 refresher. About 3 minutes.*
 
-**Depends on:** `index.html`, `app.js`, `config.js`, `dashboard-worker/wrangler.toml`, `dashboard-worker/src/index.js`, `briefing-retrieval/wrangler.toml`, `briefing-retrieval/src/judge.js`, `DASHBOARD-REFERENCE.md`
+**Depends on:** `index.html`, `read.html`, `shared.js`, `app.js`, `read.js`, `config.js`, `dashboard-worker/wrangler.toml`, `dashboard-worker/src/index.js`, `briefing-retrieval/wrangler.toml`, `briefing-retrieval/src/judge.js`, `DASHBOARD-REFERENCE.md`
 
 ## The pieces
 
@@ -24,17 +24,18 @@ Your dashboard is four programs running in four places, plus the services they b
   │  NOT in this repo)│  │  Notion tasks, devotion, lectionary       │
   └───────────────────┘  └──────────────▲───────────────────────────┘
        PUT /otf (write key)             │ GET (read key for 4 routes)
-                                        │
+                                        │ POST /reading-state (state key, phone)
                          ┌──────────────┴───────────────────────────┐
-  when you open it       │  the page  (your iPad's browser)          │
-                         │  index.html + config.js + app.js          │
+  when you open it       │  two pages, sharing shared.js:            │
+                         │  iPad: index.html + app.js                │
+                         │  phone: read.html + read.js               │
                          │  served by GitHub Pages                   │──▶ Open-Meteo (weather)
                          └──────────────────────────────────────────┘──▶ Wikipedia (On this day)
 ```
 
 | Piece | Lives in this repo? | Runs on | Goes live when |
 |---|---|---|---|
-| The page | Yes: `index.html`, `app.js`, `config.js` | Your iPad's browser, served by GitHub Pages | A change reaches `main` (automatic) |
+| The pages | Yes: `index.html` + `app.js` (iPad), `read.html` + `read.js` (phone), both with `config.js` and `shared.js` | The iPad's and the phone's browsers, served by GitHub Pages | A change reaches `main` (automatic) |
 | `briefing` Worker | Yes: `dashboard-worker/` | Cloudflare | Someone runs `npm run deploy` in that folder |
 | `briefing-retrieval` Worker | Yes: `briefing-retrieval/` | Cloudflare, on a timer | Someone runs `npm run deploy` in that folder |
 | otf-sync | **No.** Private repo `clints81/otf-sync` | GitHub Actions, on a timer | Its own repo's schedule |
@@ -45,7 +46,7 @@ Your dashboard is four programs running in four places, plus the services they b
 2. **Usually by about 2:30am.** The pool is ready. On the next wake-up the Worker sends the pool to the Claude API as a *batch* (half price, back within minutes). If the batch isn't back by 4:30am, it asks again directly at full price.
 3. **When Claude answers.** The Worker checks every story against the pool, drops anything it can't back up, picks the links itself, and PUTs the finished briefing to the `briefing` Worker using the write key. It also logs the day's stories to its own store and to Notion.
 4. **3:40am.** otf-sync logs in to Orangetheory, gathers your classes and the month's plan, and PUTs them to the `briefing` Worker's `/otf` route with the same write key.
-5. **About 6am, you open the iPad.** GitHub Pages hands over `index.html`, which loads `config.js` and then `app.js`. `app.js` fires off nine requests at once. Weather and On this day go straight to Open-Meteo and Wikipedia. The other seven go to the `briefing` Worker, which answers from its storage (briefing, sit-with archive, Orangetheory) or fetches on the page's behalf (sports, calendar, Notion tasks, devotion).
+5. **About 6am, you open the iPad.** GitHub Pages hands over `index.html`, which loads `config.js`, then `shared.js`, then `app.js`. `app.js` fires off ten requests at once. Weather and On this day go straight to Open-Meteo and Wikipedia. The other seven go to the `briefing` Worker, which answers from its storage (briefing, sit-with archive, Orangetheory) or fetches on the page's behalf (sports, calendar, Notion tasks, devotion). The tenth asks which picks you've marked read on the phone. In the evening the phone's reading page (`read.html`) does the same with its own short list: weather, the briefing, the sit-with archive, read marks, the devotion and this week's readings.
 6. **All day.** Each time the app comes back to the foreground (at most once a minute) or the iPad reconnects, the page asks for everything again.
 
 ## Two things to keep in your head

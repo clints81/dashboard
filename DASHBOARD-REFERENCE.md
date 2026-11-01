@@ -12,9 +12,12 @@ A personal morning dashboard for Clint Sievers, hosted on GitHub Pages. Plain HT
 **Orangetheory sync:** `github.com/clints81/otf-sync`, a **private** repo whose scheduled GitHub Action PUTs workout data to the Worker (see The Orangetheory card)
 
 Repo files:
-- `index.html` — structure and design (edit rarely)
+- `index.html` — the iPad page: structure and design (edit rarely)
 - `config.js` — personal data layer (edit regularly, no coding required)
-- `app.js` — runtime logic and data fetching (edit for feature changes)
+- `shared.js` — code both pages use: the Worker URL, `fetchRetry`, the keys, dates, text helpers, the `/sitwith` and `/reading-state` fetches (see The phone reading page)
+- `app.js` — the iPad page's runtime: rendering every card (edit for feature changes)
+- `read.html`, `read.js` — the phone reading page (see The phone reading page)
+- `manifest.json` + `icon-*.png` (iPad), `read-manifest.json` + `read-icon-*.png` (phone) — home-screen installs
 - `dashboard-worker/` — the Cloudflare Worker: source in `src/index.js`, config in `wrangler.toml` (edit, commit, then `npm run deploy` from that folder)
 - `briefing-retrieval/` — the Worker that writes the briefing overnight; its own `README.md` and `DESIGN.md` (see The briefing system)
 - `DASHBOARD-REFERENCE.md` — this file
@@ -124,7 +127,7 @@ Added 2026-11-01 (Stage 2 of the phone reading page). Marking a sit-with pick do
 Where the key lives, the read key's pattern exactly:
 - `STATE_KEY` secret in this Worker's Cloudflare settings
 - 1Password, item "Dashboard state key"
-- Each device's browser storage (`localStorage["dashStateKey"]`), entered once per device on the page (Stage 3)
+- The phone's browser storage (`localStorage["dashStateKey"]`), entered once on the reading page. Only the phone marks things, so the iPad doesn't need it (the brief's after-deploy list had it on the iPad too; showing marks takes only the read key)
 
 Never in the repo, the course, or a command-line argument.
 
@@ -138,7 +141,7 @@ To check the key without changing anything, send a body the route refuses. It ch
 read -rs K; printf 'header = "X-State-Key: %s"\n' "$K" | curl -sS -K - -X POST -d '{}' https://briefing.clintsievers.workers.dev/reading-state; unset K
 ```
 
-To rotate: new value in 1Password, `npx wrangler secret put STATE_KEY` from `dashboard-worker/`, then re-enter the key on each device. Devices show the "Key rejected" state when they try to mark something until you do. Only `briefing` holds it, so there's nothing else to update.
+To rotate: new value in 1Password, `npx wrangler secret put STATE_KEY` from `dashboard-worker/`, then re-enter it on the phone (reading list, or "Change keys" in the footer). Until you do, a tap on a check moves the row back and the list says "State key rejected · Re-enter key". Only `briefing` holds it, so there's nothing else to update.
 
 ### Why a Worker exists at all
 The dashboard is served from `clints81.github.io`. Browsers refuse to let a page read a response from another origin unless that origin sends CORS headers saying it's allowed. Notion doesn't. `nytimes.com` doesn't. Server-side fetches aren't subject to that rule, so the Worker fetches on the dashboard's behalf and re-serves the result with `access-control-allow-origin: *`.
@@ -158,10 +161,11 @@ History: while the briefing ran in Cowork, GitHub was ruled out as the delivery 
 - **Calendar** — Worker `/calendar` route. Today's events from Google/iCloud ICS feeds. See below.
 - **Treasurer tasks** — Worker `/tasks` route. JELC tasks from Notion. See below.
 - **Daily devotion** — Worker `/devotion` route. WELS Daily Devotions RSS. See below.
-- **Lectionary readings** — Worker `/lectionary` route. No page uses it yet; the phone reading page will (see Backlog). See The lectionary route.
+- **Lectionary readings** — Worker `/lectionary` route, on the phone reading page only. See The lectionary route.
+- **Reading state** — Worker `/reading-state` route (read key): which picks are marked done. See The reading state.
 - **Orangetheory** — Worker `/otf` route, filled by the otf-sync Action. See The Orangetheory card.
 
-All of these go through `fetchRetry()` in `app.js`: one retry after 2.5s, and a non-200 is treated as failure rather than parsed as JSON. The thrown error carries `.status`. A 401 is not retried, so the key-protected cards can tell "locked" from "broken".
+All of these go through `fetchRetry()` in `shared.js` (both pages use it): one retry after 2.5s, and a non-200 is treated as failure rather than parsed as JSON. The thrown error carries `.status`. A 401 is not retried, so the key-protected cards can tell "locked" from "broken".
 
 ### Static (config.js)
 - Fallback "something to sit with" (shown only if the briefing fetch fails)
@@ -363,7 +367,7 @@ Run against the real file for every day from Nov 1, 2026 to Nov 26, 2028, every 
 - `empty-file`, `not-ics` (Google sent something else, such as a sign-in page), `HTTP nnn`, `error: …`
 
 ### CPU and cache
-The Free plan allows 10 ms of CPU per request (see The calendar route). The first version split the whole file into lines and looked at each, about 7 ms of CPU cold in Node: too close. The scan now jumps from one `DTSTART` to the next with `indexOf`, reads only the date, and unfolds and parses only the few events inside the window. On the real file that adds about 1.4 ms over a one-event feed in Node, most of it decoding the download. Node isn't the Workers runtime, so check `cpuTime` in `wrangler tail` after deploying.
+The Free plan allows 10 ms of CPU per request (see The calendar route). The first version split the whole file into lines and looked at each, about 7 ms of CPU cold in Node: too close. The scan now jumps from one `DTSTART` to the next with `indexOf`, reads only the date, and unfolds and parses only the few events inside the window. On the real file that adds about 1.4 ms over a one-event feed in Node, most of it decoding the download. Node isn't the Workers runtime, so it was checked after deploying: **`cpuTime` 8 ms** for an uncached request (`wrangler tail --format json`, 2026-11-01; the plain tail view leaves CPU time out). That fits, with less room than the Node numbers suggested; most of it is probably decoding the 220 KB download, which Node didn't measure. It runs about once a day per cache key, so an occasional overrun wouldn't show. Don't add per-request work to this route without measuring again.
 
 The answer depends on the day, so **the Chicago date is part of the cache key** (`?date=` is set on the key even when the request has none). With a plain 12-hour cache, a copy filled on Sunday evening would still show that Sunday on Monday morning. A good answer is cached 12 hours; a failure 5 minutes, so it retries soon.
 
@@ -402,9 +406,10 @@ Returns `{items, sources, generated}`. Public, CORS `*`, `cache-control: no-stor
 - If `sources.archive` isn't `ok`, or the fetch fails, the strip (or the Sunday card) says **"Archive unavailable"**. It's never hidden, so a broken archive can't look like a quiet week.
 - Upstream text can arrive entity-encoded (`&#39;`). The page decodes it, then escapes it. The hero card decodes too.
 - `renderSitArchive(data, 'YYYY-MM-DD')` is split from the fetch, so the Sunday card can be checked on any day from the console.
+- **Done marks** (since 2026-11-01): a pick marked read on the phone gets a quiet mark on the iPad: "✓ Read" after the hero's source line, a check before the headline in the strip (headline dimmed), and "✓ Read" in the Sunday card's kicker. Nothing moves: the strip's check sits inside the one-line headline, because after the fixed-width weekday it wrapped and grew each row by 13px. Marks need the read key; without it, or if `/reading-state` can't be read, there are simply none (the iPad never marks anything itself). `applyDoneMarks()` runs after each of the three fetches, so the order they finish in doesn't matter. The Sunday card wasn't in the brief; it's the strip's Sunday stand-in, so it got the same mark.
 
 ### The reading state (since 2026-11-01)
-Which picks are done, shared between the phone and the iPad. Stage 2 of the phone reading page; no page reads or writes it until Stage 3.
+Which picks are done, shared between the phone and the iPad. Stage 2 of the phone reading page. The phone reads and writes it; the iPad only reads it, for its done marks.
 
 **Storage.** KV key `reading-state` in `env.BRIEFING`: a JSON object of sit-with URL → `{"status": "done", "at": "<ISO time>"}`. Unmarking deletes the entry, so only `done` is ever stored.
 
@@ -441,7 +446,7 @@ Editions:
 
 `· floor` on a category marks a Technology, Science or Religion story included to meet the one-of-each floor rather than on merit. A short night is published with "Partial edition: …" at the start of the synthesis; a failed night shows "No briefing this morning…". Either way, yesterday's briefing never sits there looking like today's.
 
-On the page, a briefing whose `date` isn't today gets the "No briefing yet today. Showing …'s" line. "Today" is the **Chicago** date (`chicagoDate()` in `app.js`). Until 2026-10-14 the check used `toISOString()`, which is UTC and rolls over to tomorrow at 7pm Central (6pm in winter), so every evening the current briefing was labeled as stale.
+On the page, a briefing whose `date` isn't today gets the "No briefing yet today. Showing …'s" line. "Today" is the **Chicago** date (`chicagoDate()` in `shared.js`). Until 2026-10-14 the check used `toISOString()`, which is UTC and rolls over to tomorrow at 7pm Central (6pm in winter), so every evening the current briefing was labeled as stale.
 
 The full edition, with every source behind each story and what was dropped, is at `briefing-retrieval.clintsievers.workers.dev/brief`.
 
@@ -460,7 +465,7 @@ Both logs need the Worker's Notion integration connected (page ⋯ → Connectio
 |---|---|---|
 | Weather | Open-Meteo | Live; retry + refresh |
 | Briefing synthesis + headlines | Worker `/` | Written by `briefing-retrieval` |
-| Something to sit with | Worker `/` | config.js fallback; "Earlier this week" strip from `/sitwith` (Mon–Sat) |
+| Something to sit with | Worker `/` | config.js fallback; "Earlier this week" strip from `/sitwith` (Mon–Sat); done marks from `/reading-state` (read key) |
 | Last week's reads | Worker `/sitwith` | Sundays only |
 | Your teams | Worker `/sports` | Team news, no scores |
 | Orangetheory | Worker `/otf` | Today's lookahead, last class, month vs goal, workout-thread link; read key. See below |
@@ -579,6 +584,58 @@ So the thread is a static link, now the footer of the Orangetheory card. It can'
 
 ---
 
+## The phone reading page
+
+`read.html` (with `read.js`), added 2026-11-01, Stage 3 of the phone reading page brief. The phone is where Clint reads, evenings included; the iPad is a short glance in the morning and maybe at lunch. So the phone gets its own page, built for reading: the sit-with picks as a Pocket/Instapaper-style list, the devotion with this week's lectionary readings, and a slimmed-down briefing. He reads one, sometimes two, pieces a day, so the existing one-pick-a-day archive is enough: no new collecting.
+
+### Decisions (planning chat, 2026-11-01)
+- **A separate page, not a responsive iPad page.** The two devices do different jobs, and the iPad page is tuned to 1194 wide with a landscape-locked manifest. The phone has its own HTML file and manifest (`read-manifest.json`: portrait, "Reading", start URL `read.html`) and its own icon (`read-icon-*.png`, a page of lines with a terracotta bookmark, in the sunrise icon's palette).
+- **No full-text reader view.** Most sit-with sources are paywalled, so the Worker would mostly fetch teasers, and serving article text from a public site would republish other people's work. A tap opens the publisher, where Clint's subscriptions live. Checked on 2026-11-01: links opened from a home-screen app open in the right app, logged in.
+- **Phone cards:** reading list, devotion plus this week's readings, weather (one line), briefing. **Not** on the phone: teams, Orangetheory, Treasurer tasks, calendar. They're already easy to reach on the phone, or busy next to long reading.
+- **"Done" syncs between phone and iPad**, stored in the Worker (The reading state), chosen over a phone-only state so there's less to manage later.
+- **Unread picks age out after 14 days** rather than piling up as a guilt list. Done items stay in a collapsed "Read" section.
+- **The calendar's CPU overrun stays as is** (Free plan, decided 2026-10-21); nothing here touches it.
+- **The readings are phone-only.** The brief allowed them on the iPad's devotion card only if the rail still ended near the briefing at 1194 wide on a full sports day. Measured 2026-11-01 (six sports items, read key, a one-line calendar): the briefing's last story ends at 897px and the rail at 1,244px, already ~350px past it, and the readings would add ~200px.
+
+### Shared code (`shared.js`)
+Both pages load `config.js`, then `shared.js`, then their own script, with plain `<script>` tags and no build step. `shared.js` holds what both need: `$`, the Worker base URL (`WORKER`), `chicagoDate()` and the date helpers, `escapeHTML`/`decodeEntities`/`plain`/`safeHref`, `fetchRetry`, both keys (`getReadKey`/`setReadKey`, `getStateKey`/`setStateKey`), `fetchSitwith()` and `fetchReadingState()`. **The rule (from the brief): two pages rendering the same data drift apart, so fetching, decoding and keys live in one place and only the rendering differs.** `app.js` renders the iPad; `read.js` renders the phone.
+
+The move out of `app.js` was checked to change nothing on the iPad: screenshots at 1194×834 (DPR 2) and a dump of every element's position, size, colors and text, before and after, in four states (no key; read key with the protected cards failing; Sunday; briefing and archive down). All four were identical in layout and pixels.
+
+### Top to bottom
+1. **Masthead:** the date in the serif face, then one line of weather from Open-Meteo ("41° and partly cloudy · high 52°, low 36°"), or "Weather unavailable".
+2. **Reading list.** Today's pick on top, larger, with its full description: the archive's newest if it's today's, or the briefing's own pick if the archive is down. Below it, the unread picks from the last 14 days, newest first. Each row: a kicker (the weekday for the last six days, a date like "Oct 23" before that, so two weeks never show two "Fri"s; only "Today" in the accent color), the headline in the serif face, a one-line description, and source · read time. Tapping a row opens the publisher in a new tab. With nothing unread: "All caught up." With no pick yet today: "No pick yet this morning."
+   - **The done control** is a round check at the right of each row: a full 44pt target, apart from the link, so a tap meant for the headline can't mark it and a mark can't open it. A mark moves the row at once and shows "Marked read · Undo" at the bottom for six seconds, as Mail does, so a stray tap costs nothing. Swipe was considered and not used: it fights Safari's back-swipe and can't be seen.
+   - **"Read · N"**, collapsed, below the list: every done pick still in the archive (about 60 days, not just 14, so nothing vanishes), most recently marked first, dimmed, with a filled check that unmarks. Today's pick moves there too once done.
+   - The mark is one `POST /reading-state` with the state key, retried once on a network error or 5xx (marking is idempotent). If it fails, the row moves back and the bar says "Couldn't save · try again", or "State key rejected · not saved".
+3. **Devotion:** verse, reference, title, excerpt, Read and Listen, the same data as the iPad card. Then **this week's readings** from `/lectionary`: each event's day ("Sunday, Nov 8", or "Today"), its name in the serif face, and the readings as label and reference. References only, no text and no links. Any `sources.lectionary` but `ok`, including `no-items`, shows **"Readings unavailable"**; an event without readings (Thanksgiving) shows "No readings listed".
+4. **Briefing:** the synthesis, then the headlines collapsed; tap one for its summary and "Open story ↗". A briefing not dated today gets the iPad's "No briefing yet today. Showing …'s." Everything is escaped (unlike the iPad card, which inserts the briefing's text as HTML; a separate fix was suggested).
+5. **Footer:** which keys this device holds ("read key saved · state key not set") and "Change keys".
+
+### Honest states
+| What's missing | What the list shows |
+|---|---|
+| No read key | "Read marks locked on this device · Enter key". No checks, since the page can't know what's done, so done picks show as unread and the count runs high. |
+| Read key rejected | "Read key rejected · Re-enter key", no checks |
+| `/reading-state` unreadable or down | "Read marks unavailable", no checks |
+| Read key, no state key | Marks shown, checks faded, "Marking locked on this device · Enter key". A tap on a faded check opens the key form, so a missing key never looks like a broken button. |
+| State key refused on a tap | The row moves back; "State key rejected · Re-enter key" |
+| `/sitwith` down | "Archive unavailable", with today's pick from the briefing if there is one |
+
+The list always shows without any key (`/sitwith` is public). The key form asks only for the key that's missing, labeled with its 1Password item, and saving reloads only the list.
+
+### Look and feel
+This is the part Clint cares about most: it should feel like the old Pocket or Instapaper apps. One column (at most 620px wide), 22px side margins plus the safe areas (`viewport-fit=cover`), 16px body at 1.55 line height, Instrument Serif headlines (31px for today's pick, 23px for the rest), little chrome: hairline dividers, small uppercase section labels, no cards or shadows.
+
+**Dark mode follows the system setting**, as a warm dark theme rather than an inversion: brown-black background `oklch(0.215 0.012 52)` (the iPad's sit-with card and the icon), cream ink `oklch(0.930 0.013 82)`, and the terracotta lifted to `oklch(0.720 0.125 40)` so it holds its contrast. Light mode uses the iPad's tokens. Both are in `:root` and `@media (prefers-color-scheme: dark)` in `read.html`, with a `theme-color` for each.
+
+**Not checked on a device:** how iOS colors the status bar of a home-screen app in dark mode with `apple-mobile-web-app-status-bar-style: default`. That's general knowledge, not tested (Backlog).
+
+### Verified (2026-11-01, before committing)
+In Chromium (Playwright) with every request mocked by made-up data and the clock frozen at Monday Nov 2, 7:30am Chicago: screenshots at 393×852 and 430×932 (DPR 3), light and dark, sent to Clint and approved. Also each state above, the Read section open, and a tap on a check, which sent exactly one `POST` with `{url, done: true}` and showed the Undo bar. No state scrolls sideways at either width. The harness lived in the session's scratch space and wasn't committed. Two lessons from it for next time:
+- **Wait out `fetchRetry`'s 2.5s retry** before a screenshot, or failing cards are caught saying "Loading…".
+- **Chromium's text rendering flips between two variants from run to run** (up to ~1,000 faint pixels), so "identical" means identical element geometry and text, plus pixels identical or differing only by that known flip. The unchanged page differs from itself that way.
+
 ## Refresh behavior
 
 `init()` splits into `renderStatic()` and `loadLiveData()`. Live data re-pulls on:
@@ -588,6 +645,8 @@ So the thread is a static link, now the footer of the Orangetheory card. It can'
 This exists because the dashboard runs as a standalone iPad app and a single page load can sit open for days. Without it, a fetch that failed at 6am stays failed until a manual reload — a two-second network fault becomes an hours-long blank card.
 
 **Note:** after deploying `app.js`, the iPad may serve a stale bundle. Force-quit and reopen.
+
+The phone page (`read.js`) refreshes the same way, on returning to the foreground (60s cooldown) and on reconnecting, except while its key form is open: leaving for 1Password counts as a return, and a refresh would wipe a half-typed key. It may serve a stale copy after a change too; close it from the app switcher and reopen.
 
 ---
 
@@ -619,10 +678,9 @@ Another (Nov 1): **a rendered view can hide the very character that matters.** T
 - ~~Decide whether league fill earns its slots~~ — capped at 3, headline-only (Oct 2026). Revisit if the card feels thin.
 - Cleaner Worker URL via a `clintsievers.com` subdomain (deliberately deferred)
 - ~~git for the Worker~~ — **done**; deployed with wrangler since 2026-10-20 (see The Worker).
-- **Bible card:** this Sunday's lectionary readings, as references only. The `/lectionary` route is **built** (2026-11-01, see The lectionary route); the readings show on the phone reading page's devotion card (below).
-- **Phone reading page** (brief of 2026-11-01, built in three stages, each approved by Clint before the next). Stage 1, `/lectionary`, is built (see The lectionary route). Stage 2, the synced "done" state and its state key, is built (see The reading state and State key). Still to build:
-  - **Stage 3, the page:** `read.html` with its own manifest (portrait), the state key entered once per device (`localStorage["dashStateKey"]`, sent as `X-State-Key`), and shared code (`shared.js`: Worker URL, `fetchRetry`, key helpers, `chicagoDate()`, decode/escape, the `/sitwith` fetch) loaded by both pages, since two pages rendering the same data drift apart. The iPad page must look identical before and after (screenshots at 1194×834). The iPad shows a quiet done mark on picks marked done, nothing else.
-  - **Decisions behind it:** a **separate page, not a responsive iPad page**: the phone is for reading and the iPad for a short morning glance, and the iPad page is tuned to 1194 wide with a landscape-locked manifest. **No full-text reader view:** most sit-with sources are paywalled, so the Worker would mostly fetch teasers, and serving article text from a public site would republish other people's work; a tap opens the publisher, where Clint's subscriptions live (links from a home-screen app open in the right app, logged in, checked 2026-11-01). **Phone cards:** reading list, devotion plus this week's readings, weather, briefing; not teams, Orangetheory, Treasurer tasks or calendar, which are easy to reach on the phone already or are busy next to long reading. **"Done" syncs between phone and iPad**, stored in the Worker, chosen over a phone-only state so there's less to manage later. **Unread picks age out after 14 days** rather than piling up; done ones stay in a collapsed "Read" section. One pick a day is enough for now: no new collecting. The calendar's CPU overrun stays as decided on 2026-10-21.
+- ~~Bible card~~ — **done** 2026-11-01: this week's lectionary readings, references only, on the phone reading page (see The lectionary route). Not on the iPad (rail check, see The phone reading page).
+- ~~Phone reading page~~ — **done** 2026-11-01, in three stages (`/lectionary`, `/reading-state` with the state key, the page). See The phone reading page.
+- **Phone page checks on the device** (after the Stage 3 deploy): add `read.html` to the phone's home screen and enter both keys; mark a piece done on the phone and confirm the iPad shows its mark; and look at the status bar in dark mode (`status-bar-style: default` is untested there). If it's wrong, `black-translucent` with the page's own top padding is the usual alternative.
 - **Retrieval shortlist (mock up, decide later):** the judge returns two to four "also worth your time" pieces from the sit-with pool alongside the daily pick, shown on the phone page. Clint likes more options but is wary of clutter, so it needs a mockup before a decision.
 - **Check the lectionary feed before Advent 2028.** Its last event is Nov 26, 2028; from Nov 27, 2028, `/lectionary` reads `no-items` until WELSTech extends the calendar (or publishes a new one, whose URL would replace `FEED`). Look in autumn 2028.
 - **Strategy Muse card**, behind the read key: a few lines (next milestones, hours against plan). The tracker is an Apps Script in the Strategy Muse Google account and can serve a minimal summary. The project plan is a Claude.ai artifact the Worker can't read, so it needs a copy that's refreshed whenever a workstream is fleshed out.
@@ -652,3 +710,5 @@ Grid: 12-column, `var(--gap)` gutters. Briefing runs 8 wide; devotion/weather/to
 The rail should end near where the briefing does. It grows with calendar events and sports items, the briefing with story count — when adding a rail card, check both columns at 1194 wide on a full sports day, not just a quiet one.
 
 Installs as a standalone iPad app (11", landscape) via web app manifest + home screen icons. Screenshots for layout work: 1194×834 at deviceScaleFactor 2.
+
+The phone page (`read.html`) has its own tokens, light and dark, described in The phone reading page. Screenshots for it: 393×852 and 430×932 at deviceScaleFactor 3, light and dark.
